@@ -19,7 +19,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "examples/deepslate": "vite examples/deepslate",
-    "examples/minimal": "vite examples/minimal"
+    "examples/minimal": "vite examples/minimal",
+    "import-assets": "tsx scripts/importAssets.ts"
   },
   "dependencies": {
     "deepslate": "^0.25.1",
@@ -31,6 +32,7 @@
     "@types/node": "22.15.1",
     "eslint": "^9.34.0",
     "eslint-plugin-unicorn": "^62.0.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.53.1",
     "vite": "^6.3.5",

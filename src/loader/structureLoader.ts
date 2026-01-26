@@ -1,6 +1,6 @@
 import type { Resources, ItemRendererResources } from 'deepslate';
 import { NbtFile, Structure, StructureRenderer } from 'deepslate';
-import { InteractiveCanvas } from './InteractiveCanvas';
+import { InteractiveCanvas } from './interactiveCanvas';
 
 export class LimestoneLoader {
   private activeRenderer: StructureRenderer | null = null;
@@ -14,7 +14,7 @@ export class LimestoneLoader {
       Resources & ItemRendererResources
     >
   ) {
-}
+  }
 
   public async loadStructure (
     file: File,
@@ -25,7 +25,7 @@ export class LimestoneLoader {
 
     onProgress?.('Parsing NBT...');
     const nbtFile = NbtFile.read(new Uint8Array(arrayBuffer));
-    const structure = await Structure.fromNbt(nbtFile.root);
+    const structure = Structure.fromNbt(nbtFile.root);
 
     onProgress?.('Rendering structure...');
     await this.renderStructure(structure);
@@ -67,5 +67,17 @@ export class LimestoneLoader {
         dist
       );
     }
-}
+  }
+
+  public async updateResources () {
+    this.cachedResources = await this.createResourcesFn();
+    // We don't re-render here because we don't have the structure
+    // But we clear the cache so next render uses new resources
+  }
+
+  public clearCanvas () {
+    this.gl.clearColor(0, 0, 0, 0);
+    this.gl.clear(this.gl.COLOR_BUFFER_BIT | this.gl.DEPTH_BUFFER_BIT);
+    this.activeRenderer = null;
+  }
 }

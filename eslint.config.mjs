@@ -33,7 +33,7 @@ export default tseslint.config(
       '@stylistic/function-call-argument-newline': ['error', 'consistent'],
       '@stylistic/function-call-spacing': ['error', 'never'],
       '@stylistic/function-paren-newline': ['error', 'multiline'],
-      '@stylistic/indent': 'off', // https://github.com/typescript-eslint/typescript-eslint/issues/1824
+      '@stylistic/indent': ['error', 2], // careful, https://github.com/typescript-eslint/typescript-eslint/issues/1824
       '@stylistic/implicit-arrow-linebreak': ['error', 'beside'],
       '@stylistic/indent-binary-ops': ['error', 2],
       '@stylistic/key-spacing': ['error', { beforeColon: false }],

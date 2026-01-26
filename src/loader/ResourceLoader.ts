@@ -1,5 +1,6 @@
 import type { NbtTag, Resources, ItemRendererResources } from 'deepslate';
 import { BlockDefinition, BlockModel, Identifier, ItemModel, TextureAtlas, jsonToNbt, upperPowerOfTwo } from 'deepslate';
+import type { SupportedVersions } from './versions';
 
 export const MCMETA = 'https://raw.githubusercontent.com/misode/mcmeta/';
 
@@ -47,6 +48,59 @@ export async function fetchAssets (): Promise<Assets> {
       image.onload = () => res(image);
       image.crossOrigin = 'Anonymous';
       image.src = `${MCMETA}atlas/all/atlas.png`;
+    })
+  ]);
+  return { items, blockstates, models, item_models, item_components, uvMap, atlas };
+}
+
+export async function fetchSupportedVersions (): Promise<SupportedVersions> {
+  try {
+    const response = await fetch('/assets/supportedVersions.json');
+    if (!response.ok) {
+      throw new Error(`Failed to fetch supported versions: ${response.status} ${response.statusText}`);
+    }
+    const contentType = response.headers.get('content-type');
+    if (contentType && !contentType.includes('application/json')) {
+      throw new Error('Supported versions file is not valid JSON (received HTML?)');
+    }
+    return await response.json();
+  } catch (err) {
+    console.error('Error fetching supported versions, using empty defaults:', err);
+    return { create: [], minecraft: [] };
+  }
+}
+
+export async function loadVersionAssets (version: string): Promise<Assets> {
+  const base = `/assets/minecraft/${version}/`;
+
+  const fetchJson = async <T>(path: string, defaultValue: T): Promise<T> => {
+    try {
+      const response = await fetch(path);
+      if (!response.ok) {
+        return defaultValue;
+      }
+      const contentType = response.headers.get('content-type');
+      if (contentType && !contentType.includes('application/json')) {
+        return defaultValue;
+      }
+      return await response.json();
+    } catch {
+      return defaultValue;
+    }
+  };
+
+  const [items, blockstates, models, item_models, item_components, uvMap, atlas] = await Promise.all([
+    fetchJson(`${base}items.json`, []),
+    fetchJson(`${base}block_definition.json`, {}),
+    fetchJson(`${base}model.json`, {}),
+    fetchJson(`${base}item_definition.json`, {}),
+    fetchJson(`${base}item_components.json`, {}),
+    fetchJson(`${base}atlas.json`, {}),
+    new Promise<HTMLImageElement>(res => {
+      const image = new Image();
+      image.onload = () => res(image);
+      image.crossOrigin = 'Anonymous';
+      image.src = `${base}atlas.png`;
     })
   ]);
   return { items, blockstates, models, item_models, item_components, uvMap, atlas };
