@@ -4,6 +4,9 @@ import stylistic from '@stylistic/eslint-plugin';
 import unicorn from 'eslint-plugin-unicorn';
 
 export default tseslint.config(
+  {
+    ignores: ['dist/**', '**/.output', '**/.nitro', '**/.netlify', '**/.nuxt', '**/*.gen.*']
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
@@ -11,7 +14,6 @@ export default tseslint.config(
       '@stylistic': stylistic,
       'unicorn': unicorn
     },
-    ignores: ['dist/**', '**/.output', '**/.nitro', '**/.netlify', '**/.nuxt', '**/*.gen.*'],
     rules: {
       'curly': 'error',
       'eqeqeq': 'error',

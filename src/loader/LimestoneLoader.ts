@@ -10,11 +10,16 @@ export class LimestoneLoader {
   constructor (
     private readonly canvas: HTMLCanvasElement,
     private readonly gl: WebGLRenderingContext,
-    private readonly createResourcesFn: () => Promise<Resources & ItemRendererResources>
+    private readonly createResourcesFn: () => Promise<
+      Resources & ItemRendererResources
+    >
   ) {
 }
 
-  public async loadStructure (file: File, onProgress?: (status: string) => void) {
+  public async loadStructure (
+    file: File,
+    onProgress?: (status: string) => void
+  ) {
     onProgress?.('Loading file...');
     const arrayBuffer = await file.arrayBuffer();
 
@@ -32,9 +37,17 @@ export class LimestoneLoader {
       this.cachedResources = await this.createResourcesFn();
     }
 
-    const renderer = new StructureRenderer(this.gl, structure, this.cachedResources);
+    const renderer = new StructureRenderer(
+      this.gl,
+      structure,
+      this.cachedResources
+    );
     const size = structure.getSize();
-    const center: [number, number, number] = [size[0] / 2, size[1] / 2, size[2] / 2];
+    const center: [number, number, number] = [
+      size[0] / 2,
+      size[1] / 2,
+      size[2] / 2
+    ];
     const dist = Math.max(size[0], size[1], size[2]) * 1.5;
 
     this.activeRenderer = renderer;
@@ -42,12 +55,17 @@ export class LimestoneLoader {
     if (this.activeCanvas) {
       this.activeCanvas.setCenter(center, dist);
     } else {
-      this.activeCanvas = new InteractiveCanvas(this.canvas, view => {
-        if (this.activeRenderer) {
-          this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-          this.activeRenderer.drawStructure(view);
-        }
-      }, center, dist);
+      this.activeCanvas = new InteractiveCanvas(
+        this.canvas,
+        view => {
+          if (this.activeRenderer) {
+            this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+            this.activeRenderer.drawStructure(view);
+          }
+        },
+        center,
+        dist
+      );
     }
-  }
+}
 }

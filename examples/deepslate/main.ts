@@ -1,3 +1,7 @@
+/* eslint-disable */
+// @ts-nocheck
+// this is demo code from the original deepslate repo, kept here for reference
+
 import { mat4 } from 'gl-matrix';
 import type { ItemRendererResources, ItemRenderingContext, NbtTag, Resources, Voxel } from 'deepslate';
 import { BlockDefinition, BlockModel, Identifier, ItemRenderer, ItemStack, NormalNoise, Structure, StructureRenderer, TextureAtlas, VoxelRenderer, XoroshiroRandom, jsonToNbt, upperPowerOfTwo, ItemModel } from 'deepslate';
@@ -129,35 +133,35 @@ Promise.all([
 
   const resources: Resources & ItemRendererResources = {
     getBlockDefinition (id) {
- return blockDefinitions[id.toString()];
-},
+      return blockDefinitions[id.toString()];
+    },
     getBlockModel (id) {
- return blockModels[id.toString()];
-},
+      return blockModels[id.toString()];
+    },
     getTextureUV (id) {
- return textureAtlas.getTextureUV(id);
-},
+      return textureAtlas.getTextureUV(id);
+    },
     getTextureAtlas () {
- return textureAtlas.getTextureAtlas();
-},
+      return textureAtlas.getTextureAtlas();
+    },
     getPixelSize () {
- return textureAtlas.getPixelSize();
-},
+      return textureAtlas.getPixelSize();
+    },
     getBlockFlags (id) {
- return { opaque: false };
-},
+      return { opaque: false };
+    },
     getBlockProperties (id) {
- return null;
-},
+      return null;
+    },
     getDefaultBlockProperties (id) {
- return null;
-},
+      return null;
+    },
     getItemModel (id) {
- return itemModels[id.toString()];
-},
+      return itemModels[id.toString()];
+    },
     getItemComponents (id) {
- return itemComponents[id.toString()];
-}
+      return itemComponents[id.toString()];
+    }
   };
 
   // === Item rendering ===
