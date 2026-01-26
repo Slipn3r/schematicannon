@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { mkdir, writeFile, rm, stat } from 'node:fs/promises';
+import { mkdir, writeFile, rm, stat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 export async function importMinecraftVersionResources (version: string) {
@@ -78,5 +78,75 @@ export async function importMinecraftVersionResources (version: string) {
     } finally {
       await rm(zipPath);
     }
+  }
+}
+
+export async function hasCreateAssets (version: string): Promise<boolean> {
+  const base = join(process.cwd(), 'assets', 'create', version);
+  const required = ['blockstates', 'models', 'textures'];
+
+  for (const dir of required) {
+    const full = join(base, dir);
+    try {
+      const s = await stat(full);
+      if (!s.isDirectory()) {
+        return false;
+      }
+      const entries = await readdir(full);
+      if (entries.length === 0) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+export async function importCreateVersionResources (version: string, jarUrl: string) {
+  if (await hasCreateAssets(version)) {
+    console.log(`[Create ${version}] Skipping - assets already present.`);
+    return;
+  }
+
+  const baseDir = join(process.cwd(), 'assets', 'create', version);
+  await mkdir(baseDir, { recursive: true });
+
+  const jarPath = join(process.cwd(), `temp-create-${version}.jar`);
+
+  console.log(`[Create ${version}] Downloading JAR...`);
+  const response = await fetch(jarUrl);
+  if (!response.ok) {
+    throw new Error(`Failed to download Create JAR: ${response.status} ${response.statusText}`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  await writeFile(jarPath, buffer);
+
+  try {
+    // Validate JAR content before extraction
+    const list = execSync(`unzip -l "${jarPath}" "assets/create/*"`).toString();
+    if (!list.includes('assets/create/')) {
+      throw new Error(`JAR for ${version} does not contain assets/create/`);
+    }
+
+    console.log(`[Create ${version}] Extracting assets/create/*...`);
+    const tempExtract = join(process.cwd(), `temp-extract-create-${version}`);
+    // Clear tempExtract if it exists to avoid prompts
+    await rm(tempExtract, { recursive: true, force: true }).catch(() => {
+    });
+    await mkdir(tempExtract, { recursive: true });
+
+    // -q for quiet, -o for overwrite (essential for case-insensitive filesystems like macOS), -d for destination
+    execSync(`unzip -qo "${jarPath}" "assets/create/*" -d "${tempExtract}"`);
+
+    const extractedDir = join(tempExtract, 'assets', 'create');
+    execSync(`cp -R "${extractedDir}/"* "${baseDir}/"`);
+
+    await rm(tempExtract, { recursive: true, force: true }).catch(() => {
+    });
+  } finally {
+    await rm(jarPath).catch(() => {
+    });
   }
 }
