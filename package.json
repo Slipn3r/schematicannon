@@ -18,6 +18,7 @@
   "scripts": {
     "build": "vite build",
     "lint": "eslint .",
+    "examples/deepslate": "vite examples/deepslate",
     "examples/minimal": "vite examples/minimal"
   },
   "dependencies": {
