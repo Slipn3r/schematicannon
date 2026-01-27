@@ -1,0 +1,1711 @@
+import { BlockDefinition, BlockModel } from 'deepslate';
+import { Identifier } from 'deepslate/core';
+import { createBlockModelFromJson } from './deepslate_extensions';
+import { parseObj } from './obj_loader.js';
+
+const DEFAULT_ASSETS_BASE = './assets/create';
+const SUBPART_TOKENS = ['head', 'blade', 'pole', 'cog', 'cogwheel', 'pointer', 'flap', 'hand', 'fan', 'shaft', 'arm', 'middle', 'hose', 'top', 'belt', 'claw', 'body'];
+const AUTO_SUBPART_BLOCKS = ['funnel', 'tunnel', 'spout', 'mechanical_mixer', 'mechanical_pump', 'portable_storage_interface', 'mechanical_saw', 'mechanical_drill', 'deployer', 'mechanical_press', 'analog_lever', 'hand_crank', 'weighted_ejector'];
+
+export interface LoadedAssets {
+  blockDefinitions: Record<string, BlockDefinition>;
+  blockModels: Record<string, BlockModel>;
+  textures: Record<string, Blob>;
+}
+
+export interface CreateModLoaderOptions {
+  assetsBase?: string;
+  enableAutoSubparts?: boolean;
+  modelManifest?: Iterable<string>;
+}
+
+export class CreateModLoader {
+  private readonly fetchedBlockDefinitions = new Map<string, any>();
+  private readonly fetchedBlockModels = new Map<string, any>();
+  private readonly fetchedTextures = new Map<string, Blob>();
+  private readonly enableAutoSubparts: boolean;
+  private readonly autoSubpartLog: Array<{ blockId: string; baseModel: string; subpart: string; when: Record<string, string> | undefined }> = [];
+  private readonly assetsBase: string;
+  private readonly modelManifest: Set<string>;
+
+  // Cache to prevent duplicate fetches
+  private readonly visitedModels = new Set<string>();
+  private readonly missingResources = new Set<string>();
+
+  constructor (options: CreateModLoaderOptions = {}) {
+    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : undefined;
+    // Default on; can disable with ?enableAutoSubparts=0 if it over-attaches.
+    const paramFlag = params?.get('enableAutoSubparts');
+    this.enableAutoSubparts = options.enableAutoSubparts ?? paramFlag !== '0';
+    this.assetsBase = options.assetsBase ?? DEFAULT_ASSETS_BASE;
+    this.modelManifest = new Set(options.modelManifest ?? []);
+  }
+
+  private rotateElementsX90 (elements: any[]): any[] {
+    return elements.map(el => this.rotateElementX90(JSON.parse(JSON.stringify(el))));
+  }
+
+  public getAutoSubpartDebug () {
+    return this.autoSubpartLog.slice();
+  }
+
+  async loadBlocks (blockIds: Set<string>): Promise<LoadedAssets> {
+    console.log(`Loading assets for ${blockIds.size} Create blocks...`);
+
+    const definitions: Record<string, BlockDefinition> = {};
+    const models: Record<string, BlockModel> = {};
+    const textures: Record<string, Blob> = {};
+
+    for (const id of blockIds) {
+      if (!id.startsWith('create:')) {
+        continue;
+      }
+
+      try {
+        // 1. Fetch Block Definition (BlockState)
+        const defJson = await this.fetchJson(`${this.assetsBase}/blockstates/${id.replace('create:', '')}.json`);
+
+        if (defJson) {
+          if (id === 'create:mechanical_crafter') {
+            await this.injectMechanicalCrafterGears(defJson);
+          } else if (id === 'create:mechanical_arm') {
+            await this.injectMechanicalArmCog(defJson);
+          }
+          if (id === 'create:spout') {
+            await this.ensureSpoutNozzles();
+          }
+          // Apply procedural patches to definitions first
+          if (id === 'create:belt') {
+            this.patchBeltDefinition(defJson);
+          } else if (id === 'create:encased_fluid_pipe') {
+            this.patchEncasedPipeDefinition(defJson);
+          } else if (id === 'create:fluid_pipe') {
+            this.patchFluidPipeConnectionRules(defJson);
+          } else if (id.includes('encased_cogwheel') || id.includes('encased_shaft')) {
+            this.patchEncasedCogDefinition(defJson, id);
+          }
+
+          // Auto subparts mutate the blockstate; run them before freezing into BlockDefinition.
+          if (id.includes('mechanical_mixer')) {
+            await this.loadModelRecursive('create:block/cogwheel_shaftless');
+          }
+          if (this.enableAutoSubparts) {
+            await this.preloadSubpartModels(this.extractModelsFromDefinition(defJson));
+            this.autoAttachSubparts(defJson, id);
+          }
+
+          definitions[id] = BlockDefinition.fromJson(defJson);
+
+          // 2. Scan for Models in the definition
+          const modelPaths = this.extractModelsFromDefinition(defJson);
+
+          for (const modelPath of modelPaths) {
+            await this.loadModelRecursive(modelPath);
+          }
+
+          // Extra Models: Ensure implicit dependencies for patched blocks are loaded
+          const extraModels: string[] = [];
+          if (id.includes('encased_cogwheel')) {
+            extraModels.push('create:block/cogwheel_shaftless');
+            extraModels.push('create:block/large_cogwheel_shaftless');
+          }
+          if (id.includes('encased_shaft')) {
+            extraModels.push('create:block/shaft');
+          }
+
+          for (const m of extraModels) {
+            await this.loadModelRecursive(m);
+          }
+
+        } else {
+          this.missingResources.add(`Blockstate: ${id}`);
+        }
+
+      } catch (e) {
+        console.error(`Failed to load assets for ${id}`, e);
+      }
+    }
+
+    if (this.missingResources.size > 0) {
+      console.warn('Missing Create Mod Resources:', Array.from(this.missingResources).sort());
+    }
+
+    // Process collected raw data into the return format
+    // We need to construct BlockModel objects now that we have all potentially related models (parents)
+
+    // This is a simplified flattening. In reality, deepslate BlockModel can flatten itself if we provide a getter for other models.
+    // We'll prepare the models map for deepslate to use.
+
+    this.fetchedBlockModels.forEach((json, key) => {
+      const modelId = key.includes(':') ? key : `create:${key}`;
+
+      // PATCH PIPE MESHES:
+      // The asset models (u_x, lr_y, etc) only contain the central core knot (4,4,4 to 12,12,12).
+      // We must procedurally add the limbs based on the filename.
+      // AND ensure the core knot has all 6 faces to prevent holes.
+      if (modelId.startsWith('create:block/fluid_pipe/')) {
+        this.patchPipeCoreFaces(json);
+        this.patchPipeModelLimbs(json, modelId);
+      }
+
+      // We only care about create models here. Vanilla models are handled by the main app.
+      // If a Create model parents a Vanilla model, Deepslate needs to be able to find it.
+      // For now, we assume we return all fetched Create models.
+      models[modelId] = createBlockModelFromJson(json, Identifier.parse(modelId));
+    });
+
+    this.fetchedTextures.forEach((blob, key) => {
+      // Ensure texture IDs are fully qualified
+      const textureId = key.includes(':') ? key : `create:${key}`;
+      textures[textureId] = blob;
+    });
+
+    return {
+      blockDefinitions: definitions,
+      blockModels: models,
+      textures: Object.fromEntries(this.fetchedTextures.entries()) // IDs are already fixed in the map keys if we are careful
+    };
+  }
+
+  private async preloadSubpartModels (modelPaths: string[]) {
+    const queued = new Set<string>();
+    for (const model of modelPaths) {
+      const clean = this.normalizePath(model);
+      for (const candidate of this.getSubpartCandidates(clean)) {
+        if (queued.has(candidate)) {
+          continue;
+        }
+        queued.add(candidate);
+        await this.loadModelRecursive(candidate);
+      }
+    }
+  }
+
+  private getSubpartCandidates (baseModel: string): string[] {
+    const candidates: string[] = [];
+    const [ns, path] = baseModel.includes(':') ? baseModel.split(':', 2) : ['create', baseModel];
+    const parts = path.split('/');
+    const dirs = new Set<string>();
+
+    if (parts.length >= 3 && parts[0] === 'block') {
+      dirs.add(`${ns}:${parts[0]}/${parts[1]}`);
+    }
+
+    const lowerPath = path.toLowerCase();
+    if (lowerPath.includes('funnel')) {
+      dirs.add(`${ns}:block/funnel`);
+      dirs.add(`${ns}:block/belt_funnel`);
+    }
+    if (lowerPath.includes('tunnel')) {
+      dirs.add(`${ns}:block/tunnel`);
+      dirs.add(`${ns}:block/belt_tunnel`);
+    }
+
+    // Fallback to the base dir only if it is not the root block folder to avoid sweeping the entire manifest
+    const baseDir = baseModel.substring(0, baseModel.lastIndexOf('/'));
+    if (baseDir !== `${ns}:block`) {
+      dirs.add(baseDir);
+    }
+
+    for (const dir of dirs) {
+      for (const p of this.modelManifest) {
+        if (!p.startsWith(dir + '/')) {
+          continue;
+        }
+        if (p === baseModel) {
+          continue;
+        }
+        const name = p.substring(p.lastIndexOf('/') + 1);
+        if (SUBPART_TOKENS.some(t => name.includes(t))) {
+          candidates.push(p);
+        }
+      }
+    }
+
+    return candidates;
+  }
+
+  private autoAttachSubparts (def: any, blockId: string) {
+    // Limit auto-attachments to known safe blocks to avoid mass over-attachment.
+    if (!AUTO_SUBPART_BLOCKS.some(k => blockId.includes(k))) {
+      return;
+    }
+
+    const parseWhen = (key: string): Record<string, string> | undefined => {
+      if (!key) {
+        return undefined;
+      }
+      const when: Record<string, string> = {};
+      for (const pair of key.split(',')) {
+        if (!pair) {
+          continue;
+        }
+        const [k, v] = pair.split('=');
+        if (k && v) {
+          when[k] = v;
+        }
+      }
+      return Object.keys(when).length ? when : undefined;
+    };
+
+    const referenced = new Set<string>();
+    const modelUsage = new Map<string, { apply: any; when: Record<string, string> | undefined }[]>();
+    const multiparts: any[] = [];
+
+    const recordUsage = (model: string, when: Record<string, string> | undefined, apply: any) => {
+      const norm = this.normalizePath(model);
+      referenced.add(norm);
+      if (!modelUsage.has(norm)) {
+        modelUsage.set(norm, []);
+      }
+      modelUsage.get(norm)!.push({ apply: apply ? JSON.parse(JSON.stringify(apply)) : undefined, when: when ? JSON.parse(JSON.stringify(when)) : undefined });
+    };
+
+    const pushMultipart = (apply: any, when: any) => {
+      multiparts.push({ apply, when });
+      if (apply?.model) {
+        recordUsage(apply.model, when, apply);
+      }
+    };
+
+    if (def.variants) {
+      for (const [key, variant] of Object.entries(def.variants)) {
+        const when = parseWhen(key);
+        const entries = Array.isArray(variant) ? variant : [variant];
+        for (const entry of entries) {
+          pushMultipart(entry, when);
+        }
+      }
+    }
+
+    if (def.multipart) {
+      for (const part of def.multipart) {
+        if (Array.isArray(part.apply)) {
+          for (const apply of part.apply) {
+            pushMultipart(apply, part.when);
+          }
+        } else {
+          pushMultipart(part.apply, part.when);
+        }
+      }
+    }
+
+    const added = new Set<string>();
+
+    for (const [baseModel, entries] of modelUsage.entries()) {
+      const dir = baseModel.substring(0, baseModel.lastIndexOf('/'));
+      // If the model has no subdirectory (dir == create:block), skip auto-scanning to avoid sweeping the entire manifest.
+      if (dir.endsWith(':block')) {
+        continue;
+      }
+      const whenList = entries.length ? entries : [{ apply: undefined, when: undefined }];
+
+      for (const [candidate] of this.fetchedBlockModels) {
+        if (!candidate.startsWith(dir + '/')) {
+          continue;
+        }
+        if (referenced.has(candidate)) {
+          continue;
+        }
+        const base = candidate.substring(candidate.lastIndexOf('/') + 1);
+        if (!SUBPART_TOKENS.some(t => base.includes(t))) {
+          continue;
+        }
+
+        for (const { apply: baseApply, when } of whenList) {
+          const apply: any = { model: candidate };
+          if (baseApply) {
+            for (const prop of ['x', 'y', 'z', 'uvlock']) {
+              if (prop in baseApply) {
+                apply[prop] = (baseApply as any)[prop];
+              }
+            }
+          }
+          // Pump cog orientation should align its axis to the pump facing (horizontal pumps need vertical cogs).
+          if (blockId.includes('mechanical_pump') && candidate.includes('mechanical_pump/cog')) {
+            const facing = (when as any)?.facing as string | undefined;
+            const norm = (v: number) => ((v % 360) + 360) % 360;
+            switch (facing) {
+              case 'north': apply.x = 0; apply.y = 0; break;
+              case 'south': apply.x = 0; apply.y = 180; break;
+              case 'east': apply.x = 0; apply.y = 90; break;
+              case 'west': apply.x = 0; apply.y = 270; break;
+              case 'up': apply.x = 270; apply.y = 0; break;
+              case 'down': apply.x = 90; apply.y = 0; break;
+              default: apply.x = norm(apply.x ?? 0); apply.y = norm(apply.y ?? 0); break;
+            }
+          }
+          // Drill head should align to facing rather than inheriting casing x/y which aim the body.
+          if (blockId.includes('mechanical_drill') && candidate.includes('mechanical_drill/head')) {
+            const facing = (when as any)?.facing as string | undefined;
+            const norm = (v: number) => ((v % 360) + 360) % 360;
+            switch (facing) {
+              case 'north': apply.x = 0; apply.y = norm(0); break;
+              case 'south': apply.x = 0; apply.y = norm(180); break;
+              case 'east': apply.x = 0; apply.y = norm(270); break;
+              case 'west': apply.x = 0; apply.y = norm(90); break;
+              case 'up': apply.x = norm(90); apply.y = 0; break;
+              case 'down': apply.x = norm(270); apply.y = 0; break;
+              default: break;
+            }
+          }
+          const key = `${candidate}|${apply.x ?? 0}|${apply.y ?? 0}|${apply.z ?? 0}|${apply.uvlock ?? false}|${JSON.stringify(when ?? {})}`;
+          if (added.has(key)) {
+            continue;
+          }
+          multiparts.push({ apply, when });
+          added.add(key);
+          this.autoSubpartLog.push({ blockId, baseModel, subpart: candidate, when: when ? { ...when } : undefined });
+        }
+      }
+    }
+
+    // Spout nozzles are authored as separate models (top/middle/bottom) that are never referenced in the blockstate.
+    const primaryBaseModel = modelUsage.keys().next().value ?? blockId;
+
+    // Attach them unconditionally so spouts render their nose in static scenes.
+    if (blockId.includes('spout')) {
+      for (const nozzle of ['create:block/spout/top', 'create:block/spout/middle', 'create:block/spout/bottom']) {
+        const norm = this.normalizePath(nozzle);
+        if (!this.fetchedBlockModels.has(norm)) {
+          continue;
+        }
+        if (!referenced.has(norm)) {
+          multiparts.push({ apply: { model: norm }, when: undefined });
+        }
+        referenced.add(norm);
+        this.autoSubpartLog.push({ blockId, baseModel: 'create:block/spout/block', subpart: norm, when: undefined });
+      }
+    }
+
+    // Belt funnel/tunnel flaps should align with their base variant rotation and skip vertical funnels.
+    const baseMultiparts = multiparts.slice();
+    const attachFlap = (flapId: string, sourceModelMatch: (m: string) => boolean) => {
+      const normFlap = this.normalizePath(flapId);
+      if (!this.fetchedBlockModels.has(normFlap)) {
+        console.warn(`[CreateModLoader] Missing flap model ${normFlap} for ${blockId}; skipping attachment.`);
+        return;
+      }
+      for (const part of baseMultiparts) {
+        const apply = part.apply;
+        const when = part.when;
+        const modelName = apply?.model as string | undefined;
+        if (!modelName || !sourceModelMatch(modelName)) {
+          continue;
+        }
+        const facing = (when as any)?.facing as string | undefined;
+        if (facing === 'up' || facing === 'down') {
+          continue;
+        }
+        const keyed = `${normFlap}|${JSON.stringify(when ?? {})}|${apply?.x ?? 0}|${apply?.y ?? 0}`;
+        if (referenced.has(keyed)) {
+          continue;
+        }
+        multiparts.push({ apply: { model: normFlap, x: apply?.x, y: apply?.y }, when });
+        referenced.add(keyed);
+        this.autoSubpartLog.push({ blockId, baseModel: primaryBaseModel, subpart: normFlap, when: when ? { ...when } : undefined });
+      }
+    };
+
+    if (blockId.includes('funnel')) {
+      attachFlap('create:block/funnel/flap', m => m.includes('funnel'));
+      attachFlap('create:block/belt_funnel/flap', m => m.includes('belt_funnel'));
+    }
+    if (blockId.includes('tunnel')) {
+      attachFlap('create:block/belt_tunnel/flap', m => m.includes('tunnel'));
+    }
+    if (blockId.includes('mechanical_mixer')) {
+      const cog = this.normalizePath('create:block/cogwheel_shaftless');
+      if (this.fetchedBlockModels.has(cog) && !referenced.has(cog)) {
+        multiparts.push({ apply: { model: cog }, when: undefined });
+        referenced.add(cog);
+        this.autoSubpartLog.push({ blockId, baseModel: primaryBaseModel, subpart: cog, when: undefined });
+      }
+    }
+
+    if (multiparts.length > 0) {
+      def.multipart = multiparts;
+      delete def.variants;
+    }
+  }
+
+  private async ensureSpoutNozzles () {
+    for (const nozzle of ['create:block/spout/top', 'create:block/spout/middle', 'create:block/spout/bottom']) {
+      await this.loadModelRecursive(nozzle);
+    }
+  }
+
+  private patchBeltDefinition (def: any) {
+    if (!def.variants) {
+      return;
+    }
+    const multipart: any[] = [];
+
+    for (const key of Object.keys(def.variants)) {
+      // Parse key "part=middle,slope=flat,..."
+      // Need to clean the key (extract properties)
+      const props: Record<string, string> = {};
+      key.split(',').forEach(p => {
+        const [k, v] = p.split('=');
+        props[k] = v;
+      });
+
+      const original = Array.isArray(def.variants[key]) ? def.variants[key][0] : def.variants[key];
+      const models: string[] = [];
+
+      // 1. Determine base models
+      if (props.slope === 'horizontal') {
+        if (props.part === 'middle') {
+          models.push('create:block/belt/middle');
+          models.push('create:block/belt/middle_bottom');
+          if (props.casing === 'true') {
+            models.push('create:block/belt_casing/horizontal_middle');
+          }
+        } else if (props.part === 'start') {
+          models.push('create:block/belt/start');
+          models.push('create:block/belt/start_bottom');
+          if (props.casing === 'true') {
+            models.push('create:block/belt_casing/horizontal_start');
+          }
+        } else if (props.part === 'end') {
+          models.push('create:block/belt/end');
+          models.push('create:block/belt/end_bottom');
+          if (props.casing === 'true') {
+            models.push('create:block/belt_casing/horizontal_end');
+          }
+        } else if (props.part === 'pulley') {
+          models.push('create:block/belt_pulley');
+          if (props.casing === 'true') {
+            models.push('create:block/belt_casing/horizontal_pulley');
+          }
+        }
+      }
+      // Handle Slopes (Diagonal) - Simplified mapping
+      else {
+        // Diagonal logic is complex. Using heuristics.
+        if (props.part === 'middle') {
+          models.push('create:block/belt/diagonal_middle');
+          if (props.casing === 'true') {
+            models.push('create:block/belt_casing/diagonal_middle');
+          }
+        } else if (props.part === 'start') {
+          models.push('create:block/belt/diagonal_start');
+          if (props.casing === 'true') {
+            models.push('create:block/belt_casing/diagonal_start');
+          }
+        } else if (props.part === 'end') {
+          models.push('create:block/belt/diagonal_end');
+          if (props.casing === 'true') {
+            models.push('create:block/belt_casing/diagonal_end');
+          }
+        } else if (props.part === 'pulley') {
+          if (props.casing === 'true') {
+            models.push('create:block/belt_casing/diagonal_pulley');
+          }
+        }
+      }
+
+      // Fallback if no models found (e.g. invalid state), keep original particle model logic?
+      // But original logic didn't work well.
+      if (models.length === 0) {
+        models.push('create:block/belt/particle');
+      }
+
+      // 2. Create Multipart Entry
+      for (const m of models) {
+        multipart.push({
+          apply: {
+            model: m,
+            x: original.x,
+            y: original.y,
+            uvlock: original.uvlock
+          },
+          when: props
+        });
+      }
+    }
+
+    delete def.variants;
+    def.multipart = multipart;
+  }
+
+  private patchEncasedCogDefinition (def: any, id: string) {
+    if (!def.multipart) {
+      def.multipart = [];
+    }
+    if (def.variants) {
+      for (const [key, variant] of Object.entries(def.variants)) {
+        const when: Record<string, string> = {};
+        key.split(',').forEach(pair => {
+          const [k, v] = pair.split('=');
+          if (k && v) {
+            when[k] = v;
+          }
+        });
+        const entries = Array.isArray(variant) ? variant : [variant];
+        for (const entry of entries) {
+          def.multipart.push({ apply: entry, when: Object.keys(when).length ? when : undefined });
+        }
+      }
+      delete def.variants;
+    }
+
+    // Case 1: Encased Cogwheel
+    if (id.includes('encased_cogwheel')) {
+      const isLarge = id.includes('large');
+      const cogModel = isLarge ? 'create:block/large_cogwheel_shaftless' : 'create:block/cogwheel_shaftless';
+
+      def.multipart.push({ apply: { model: cogModel }, when: { axis: 'y' } });
+      def.multipart.push({ apply: { model: cogModel, x: 90, y: 90 }, when: { axis: 'x' } });
+      def.multipart.push({ apply: { model: cogModel, x: 90 }, when: { axis: 'z' } });
+    }
+
+    // Case 2: Encased Shaft
+    if (id.includes('encased_shaft')) {
+      const shaftModel = 'create:block/shaft';
+      def.multipart.push({ apply: { model: shaftModel }, when: { axis: 'y' } });
+      def.multipart.push({ apply: { model: shaftModel, x: 90, y: 90 }, when: { axis: 'x' } });
+      def.multipart.push({ apply: { model: shaftModel, x: 90 }, when: { axis: 'z' } });
+    }
+  }
+
+  private patchEncasedPipeDefinition (def: any) {
+    if (!def.multipart) {
+      def.multipart = [];
+    }
+
+    // 1. Add Cores (Always) to ensure hole is filled
+    // We use all 3 cores to be safe.
+    def.multipart.push({ apply: { model: 'create:block/fluid_pipe/core_x' }, when: { OR: [{}] } });
+    def.multipart.push({ apply: { model: 'create:block/fluid_pipe/core_y' }, when: { OR: [{}] } });
+    def.multipart.push({ apply: { model: 'create:block/fluid_pipe/core_z' }, when: { OR: [{}] } });
+
+    // 2. Add Connections based on heuristic mapping
+    const connections = [
+      { when: { up: 'true' }, model: 'create:block/fluid_pipe/u_x' },
+      { when: { down: 'true' }, model: 'create:block/fluid_pipe/d_x' },
+      { when: { south: 'true' }, model: 'create:block/fluid_pipe/l_x' },
+      { when: { north: 'true' }, model: 'create:block/fluid_pipe/r_x' },
+      { when: { east: 'true' }, model: 'create:block/fluid_pipe/l_y' },
+      { when: { west: 'true' }, model: 'create:block/fluid_pipe/r_y' }
+    ];
+
+    for (const conn of connections) {
+      def.multipart.push({
+        apply: { model: conn.model },
+        when: conn.when
+      });
+    }
+  }
+
+  private mergeModelJson (targetId: string, sourceRef: string) {
+    let sourceId = sourceRef;
+    let transform = '';
+    if (sourceRef.includes('#')) {
+      [sourceId, transform] = sourceRef.split('#');
+    }
+
+    this.ensureElementsOnTarget(targetId);
+
+    const target = this.fetchedBlockModels.get(targetId);
+    const source = this.fetchedBlockModels.get(sourceId);
+
+    if (!target || !source) {
+      return;
+    }
+
+    let sourceElements = source.elements;
+    if (transform === 'rotate_x_90' && sourceElements) {
+      sourceElements = sourceElements.map((el: any) => this.rotateElementX90(el));
+    } else if (transform === 'rotate_x_270' && sourceElements) {
+      sourceElements = sourceElements.map((el: any) => this.rotateElementX270(el));
+    }
+
+    // Merge elements
+    if (sourceElements) {
+      if (!target.elements) {
+        target.elements = [];
+      }
+      target.elements.push(...sourceElements);
+    }
+
+    // Merge textures
+    if (source.textures) {
+      if (!target.textures) {
+        target.textures = {};
+      }
+      Object.assign(target.textures, source.textures);
+    }
+  }
+
+  private rotateElementX90 (element: any): any {
+    const newEl = JSON.parse(JSON.stringify(element));
+    // Rotate around center (8, 8, 8) by 90 deg on X
+    // y' = - (z - 8) + 8 = 16 - z
+    // z' = (y - 8) + 8 = y
+    const rot = (p: number[]) => [p[0], 16 - p[2], p[1]];
+
+    const from = rot(element.from);
+    const to = rot(element.to);
+
+    newEl.from = [
+      Math.min(from[0], to[0]),
+      Math.min(from[1], to[1]),
+      Math.min(from[2], to[2])
+    ];
+    newEl.to = [
+      Math.max(from[0], to[0]),
+      Math.max(from[1], to[1]),
+      Math.max(from[2], to[2])
+    ];
+
+    if (newEl.rotation) {
+      newEl.rotation.origin = rot(newEl.rotation.origin);
+      if (newEl.rotation.axis === 'y') {
+        newEl.rotation.axis = 'z';
+      } else if (newEl.rotation.axis === 'z') {
+        newEl.rotation.axis = 'y';
+        newEl.rotation.angle = -newEl.rotation.angle;
+      }
+    }
+
+    const faceMap: Record<string, string> = {
+      up: 'south',
+      down: 'north',
+      north: 'up',
+      south: 'down',
+      east: 'east',
+      west: 'west'
+    };
+
+    if (newEl.faces) {
+      const newFaces: any = {};
+      for (const [dir, face] of Object.entries(newEl.faces)) {
+        const newDir = faceMap[dir] || dir;
+        newFaces[newDir] = face;
+      }
+      newEl.faces = newFaces;
+    }
+    return newEl;
+  }
+
+  private rotateElementX270 (element: any): any {
+    const newEl = JSON.parse(JSON.stringify(element));
+    // Rotate around center (8, 8, 8) by 270 deg on X (or -90)
+    // y' = (z - 8) + 8 = z
+    // z' = -(y - 8) + 8 = 16 - y
+    const rot = (p: number[]) => [p[0], p[2], 16 - p[1]];
+
+    const from = rot(element.from);
+    const to = rot(element.to);
+
+    newEl.from = [
+      Math.min(from[0], to[0]),
+      Math.min(from[1], to[1]),
+      Math.min(from[2], to[2])
+    ];
+    newEl.to = [
+      Math.max(from[0], to[0]),
+      Math.max(from[1], to[1]),
+      Math.max(from[2], to[2])
+    ];
+
+    if (newEl.rotation) {
+      newEl.rotation.origin = rot(newEl.rotation.origin);
+      if (newEl.rotation.axis === 'y') {
+        newEl.rotation.axis = 'z';
+        newEl.rotation.angle = -newEl.rotation.angle;
+      } else if (newEl.rotation.axis === 'z') {
+        newEl.rotation.axis = 'y';
+      }
+    }
+
+    const faceMap: Record<string, string> = {
+      up: 'north',
+      down: 'south',
+      north: 'down',
+      south: 'up',
+      east: 'east',
+      west: 'west'
+    };
+
+    if (newEl.faces) {
+      const newFaces: any = {};
+      for (const [dir, face] of Object.entries(newEl.faces)) {
+        const newDir = faceMap[dir] || dir;
+        newFaces[newDir] = face;
+      }
+      newEl.faces = newFaces;
+    }
+    return newEl;
+  }
+
+  private patchFluidPipeConnectionRules (def: any) {
+    if (!def.multipart) {
+      def.multipart = [];
+    }
+
+    // Add broad, non-exclusive rules for every direction.
+    // These ensure that even in complex T-junctions or crosses (where standard strict rules fail),
+    // the relevant limb is still rendered.
+    // We rely on Z-fighting (invisible for identical overlaps) to handle cases where strict rules ALSO match.
+
+    // Map global direction to a model that we know has that limb (based on our procedural patch)
+    const fallbackRules = [
+      { when: { up: 'true' }, model: 'create:block/fluid_pipe/u_x' }, // u_x has usage where u->up
+      { when: { down: 'true' }, model: 'create:block/fluid_pipe/d_x' }, // d_x has usage where d->down
+      { when: { north: 'true' }, model: 'create:block/fluid_pipe/r_x' }, // r_x has usage where r->north
+      { when: { south: 'true' }, model: 'create:block/fluid_pipe/l_x' }, // l_x has usage where l->south
+      { when: { east: 'true' }, model: 'create:block/fluid_pipe/l_z' }, // l_z has usage where l->east
+      { when: { west: 'true' }, model: 'create:block/fluid_pipe/r_z' } // r_z has usage where r->west
+    ];
+
+    for (const rule of fallbackRules) {
+      def.multipart.push({
+        apply: { model: rule.model },
+        when: rule.when
+      });
+    }
+  }
+
+  private patchPipeCoreFaces (json: any) {
+    if (!json.elements) {
+      return;
+    }
+
+    // Find the core element (4,4,4 to 12,12,12)
+    const core = json.elements.find((e: any) => e.from && e.to
+      && e.from[0] === 4 && e.from[1] === 4 && e.from[2] === 4
+      && e.to[0] === 12 && e.to[1] === 12 && e.to[2] === 12);
+
+    if (core) {
+      const faces = ['north', 'south', 'east', 'west', 'up', 'down'];
+      const sampleFace = core.faces ? Object.values(core.faces)[0] as any : undefined;
+      const defaultUv = Array.isArray(sampleFace?.uv) && sampleFace.uv.length === 4 ? sampleFace.uv : [12, 8, 16, 12];
+      const defaultTexture = sampleFace?.texture ?? '#0';
+
+      if (!core.faces) {
+        core.faces = {};
+      }
+
+      for (const face of faces) {
+        if (!core.faces[face]) {
+          core.faces[face] = {
+            texture: defaultTexture,
+            uv: defaultUv
+          };
+        }
+      }
+    }
+  }
+
+  private patchPipeModelLimbs (json: any, modelId: string) {
+    const name = modelId.split('/').pop()?.replace('.json', '') || '';
+
+    // Parse components: e.g. "lu_x" -> components="lu", axis="x"
+    const parts = name.split('_');
+    if (parts.length < 2) {
+      return;
+    } // e.g. "core_x", "window", etc.
+
+    const components = parts[0];
+    const axis = parts[1]; // "x", "y", "z"
+
+    // Ignore non-connection models
+    if (!['x', 'y', 'z'].includes(axis)) {
+      return;
+    }
+    if (components === 'core') {
+      return;
+    }
+
+    if (!json.elements) {
+      json.elements = [];
+    }
+
+    // Map logic: which global direction does a component letter represent in a given axis?
+    const getDir = (comp: string, ax: string) => {
+      if (ax === 'x') { // Core Axis X (East-West)
+        if (comp === 'u') {
+          return 'up';
+        } // Local Up -> Global Up
+        if (comp === 'd') {
+          return 'down';
+        } // Local Down -> Global Down
+        if (comp === 'l') {
+          return 'south';
+        } // Local Left -> Global South
+        if (comp === 'r') {
+          return 'north';
+        } // Local Right -> Global North
+      }
+      if (ax === 'y') { // Core Axis Y (Up-Down)
+        if (comp === 'u') {
+          return 'south';
+        } // Local Up -> Global South (Wait, verify mapping)
+        if (comp === 'd') {
+          return 'north';
+        } // Local Down -> Global North
+        if (comp === 'l') {
+          return 'east';
+        } // Local Left -> Global East
+        if (comp === 'r') {
+          return 'west';
+        } // Local Right -> Global West
+      }
+      if (ax === 'z') { // Core Axis Z (North-South)
+        if (comp === 'u') {
+          return 'up';
+        } // Local Up -> Global Up
+        if (comp === 'd') {
+          return 'down';
+        } // Local Down -> Global Down
+        if (comp === 'l') {
+          return 'east';
+        } // Local Left -> Global East
+        if (comp === 'r') {
+          return 'west';
+        } // Local Right -> Global West
+      }
+      return null;
+    };
+
+    // Iterate letters (e.g. "l", "u")
+    for (const char of components) {
+      const dir = getDir(char, axis);
+      if (dir) {
+        this.addPipeLimb(json, dir);
+      }
+    }
+  }
+
+  private addPipeLimb (json: any, dir: string) {
+    // Define limb geo
+    const lim = { from: [0, 0, 0], to: [0, 0, 0], faces: {} as any };
+    // Reuse whatever UV/texture the core already declared to avoid sampling missing atlas space.
+    const core = Array.isArray(json.elements)
+      ? json.elements.find((e: any) => e.from && e.to && e.from[0] === 4 && e.from[1] === 4 && e.from[2] === 4 && e.to[0] === 12 && e.to[1] === 12 && e.to[2] === 12)
+      : undefined;
+    const pickFace = (name: string) => core?.faces ? core.faces[name] as any : undefined;
+    const sampleFace: any = pickFace(dir) || core?.faces ? (Object.values(core?.faces ?? {})[0] as any) : undefined;
+    const texRef = sampleFace?.texture ?? '#0';
+    const uvForDir = (name: string) => {
+      const face = pickFace(name);
+      return Array.isArray(face?.uv) && face.uv.length === 4 ? face.uv : undefined;
+    };
+    const uvSide = uvForDir(dir) || (Array.isArray(sampleFace?.uv) && sampleFace.uv.length === 4 ? sampleFace.uv : [4, 0, 12, 4]);
+    const uvEnd = uvSide;
+
+    // Geometry: Core is 4..12.
+    if (dir === 'up') {
+      lim.from = [4, 12, 4]; lim.to = [12, 16, 12];
+      lim.faces = {
+        north: { texture: texRef, uv: uvSide },
+        south: { texture: texRef, uv: uvSide },
+        east: { texture: texRef, uv: uvSide },
+        west: { texture: texRef, uv: uvSide },
+        up: { texture: texRef, uv: uvEnd }
+      };
+    } else if (dir === 'down') {
+      lim.from = [4, 0, 4]; lim.to = [12, 4, 12];
+      lim.faces = {
+        north: { texture: texRef, uv: uvSide },
+        south: { texture: texRef, uv: uvSide },
+        east: { texture: texRef, uv: uvSide },
+        west: { texture: texRef, uv: uvSide },
+        down: { texture: texRef, uv: uvEnd }
+      };
+    } else if (dir === 'east') {
+      lim.from = [12, 4, 4]; lim.to = [16, 12, 12];
+      lim.faces = {
+        north: { texture: texRef, uv: uvSide },
+        south: { texture: texRef, uv: uvSide },
+        up: { texture: texRef, uv: uvSide },
+        down: { texture: texRef, uv: uvSide },
+        east: { texture: texRef, uv: uvEnd }
+      };
+    } else if (dir === 'west') {
+      lim.from = [0, 4, 4]; lim.to = [4, 12, 12];
+      lim.faces = {
+        north: { texture: texRef, uv: uvSide },
+        south: { texture: texRef, uv: uvSide },
+        up: { texture: texRef, uv: uvSide },
+        down: { texture: texRef, uv: uvSide },
+        west: { texture: texRef, uv: uvEnd }
+      };
+    } else if (dir === 'south') {
+      lim.from = [4, 4, 12]; lim.to = [12, 12, 16];
+      lim.faces = {
+        east: { texture: texRef, uv: uvSide },
+        west: { texture: texRef, uv: uvSide },
+        up: { texture: texRef, uv: uvSide },
+        down: { texture: texRef, uv: uvSide },
+        south: { texture: texRef, uv: uvEnd }
+      };
+    } else if (dir === 'north') {
+      lim.from = [4, 4, 0]; lim.to = [12, 12, 4];
+      lim.faces = {
+        east: { texture: texRef, uv: uvSide },
+        west: { texture: texRef, uv: uvSide },
+        up: { texture: texRef, uv: uvSide },
+        down: { texture: texRef, uv: uvSide },
+        north: { texture: texRef, uv: uvEnd }
+      };
+    }
+
+    json.elements.push(lim);
+  }
+
+  private ensureElementsOnTarget (targetId: string) {
+    const target = this.fetchedBlockModels.get(targetId);
+    if (!target || target.elements) {
+      return;
+    }
+
+    if (target.parent) {
+      const parentId = this.normalizePath(target.parent);
+      // Assuming parent is already loaded because we loaded recursively
+      this.ensureElementsOnTarget(parentId);
+
+      const parent = this.fetchedBlockModels.get(parentId);
+      if (parent && parent.elements) {
+        // Deep recursive clone to avoid reference issues
+        target.elements = JSON.parse(JSON.stringify(parent.elements));
+      }
+    }
+  }
+
+  private flattenCompositeChildren (modelJson: any) {
+    if (!modelJson?.children || typeof modelJson.children !== 'object') {
+      return;
+    }
+    const entries = Object.entries(modelJson.children);
+    if (entries.length === 0) {
+      delete modelJson.children;
+      return;
+    }
+    const elements = modelJson.elements ?? [];
+    for (const [childName, child] of entries) {
+      if (!child || typeof child !== 'object') {
+        continue;
+      }
+      this.flattenCompositeChildren(child);
+      const textureMap = this.mergeChildTextures(modelJson, child, childName);
+      const childElements = child.elements;
+      if (!Array.isArray(childElements)) {
+        continue;
+      }
+      for (const element of childElements) {
+        const clone = JSON.parse(JSON.stringify(element));
+        this.remapElementTextures(clone, textureMap);
+        elements.push(clone);
+      }
+    }
+    modelJson.elements = elements;
+    delete modelJson.children;
+  }
+
+  private mergeChildTextures (modelJson: any, child: any, childName: string) {
+    const textures = modelJson.textures ?? (modelJson.textures = {});
+    const mapping: Record<string, string> = {};
+    const childTextures = child.textures;
+    if (!childTextures || typeof childTextures !== 'object') {
+      return mapping;
+    }
+    for (const [key, value] of Object.entries(childTextures)) {
+      if (typeof value !== 'string' || value.length === 0) {
+        continue;
+      }
+      let candidate = key;
+      if (key === 'particle') {
+        if (!textures.particle || textures.particle === value) {
+          candidate = 'particle';
+        } else {
+          candidate = `${childName}_particle`;
+        }
+      } else {
+        candidate = `${childName}_${key}`;
+      }
+      let finalKey = candidate;
+      let suffix = 0;
+      while (textures[finalKey] && textures[finalKey] !== value) {
+        suffix += 1;
+        finalKey = `${candidate}_${suffix}`;
+      }
+      textures[finalKey] = value;
+      mapping[key] = finalKey;
+    }
+    return mapping;
+  }
+
+  private remapElementTextures (element: any, textureMap: Record<string, string>) {
+    if (!element.faces) {
+      return;
+    }
+    for (const face of Object.values(element.faces)) {
+      if (!face.texture || typeof face.texture !== 'string') {
+        continue;
+      }
+      if (!face.texture.startsWith('#')) {
+        continue;
+      }
+      const key = face.texture.slice(1);
+      const mapped = textureMap[key];
+      if (!mapped) {
+        continue;
+      }
+      face.texture = `#${mapped}`;
+    }
+  }
+
+  private async loadModelRecursive (modelPath: string) {
+    const cleanPath = this.normalizePath(modelPath);
+    if (this.visitedModels.has(cleanPath)) {
+      return;
+    }
+    if (this.fetchedBlockModels.has(cleanPath)) {
+      this.visitedModels.add(cleanPath);
+      return;
+    }
+    this.visitedModels.add(cleanPath);
+
+    if (!cleanPath.startsWith('create:')) {
+      // It's likely a vanilla model (e.g. minecraft:block/cube_all), skip it as we don't fetch vanilla here.
+      return;
+    }
+
+    const relativePath = cleanPath.replace('create:', '');
+    const url = `${this.assetsBase}/models/${relativePath}.json`;
+
+    const modelJson = await this.fetchJson(url);
+    if (modelJson) {
+      // SPECIAL HANDLING FOR OBJ MODELS (Crushing Wheels)
+      if (modelJson.loader && modelJson.loader.includes('obj')) {
+        const objPathSrc = modelJson.model;
+        let objPath = objPathSrc;
+        if (!objPath.endsWith('.obj')) {
+          objPath += '.obj';
+        }
+
+        // "create:block/crushing_wheel/crushing_wheel.obj"
+        // Sometimes path might handle "models/" prefix differently
+        const relativeRef = objPath.replace(/^create:/, '');
+        // If it starts with "models/", avoid double prefix
+        const cleanRelPath = relativeRef.startsWith('models/') ? relativeRef.substring(7) : relativeRef;
+
+        const objUrl = `${this.assetsBase}/models/${cleanRelPath}`;
+
+        const objText = await this.fetchText(objUrl);
+        if (objText) {
+          const parts = parseObj(objText);
+
+          // Fix material names for Crushing Wheels
+          // The OBJ file uses names like "crushing_wheel_plates" but the texture definition uses keys like "plates"
+          if (cleanPath.includes('crushing_wheel')) {
+            const materialMap: Record<string, string> = {
+              crushing_wheel_insert: 'insert',
+              crushing_wheel_plates: 'plates',
+              m_axis: 'axis',
+              m_axis_top: 'axis_top',
+              m_spruce_log_top: 'spruce_log_top'
+            };
+
+            for (const part of parts) {
+              if (materialMap[part.texture]) {
+                part.texture = materialMap[part.texture];
+              }
+            }
+          }
+
+          // Generic OBJ texture remap: if the material name does not match any declared texture key,
+          // try a few common aliases (strip m_/leading #) and fall back to texture key "0" when available.
+          const textureKeys = new Set(Object.keys(modelJson.textures ?? {}));
+          const defaultKey = textureKeys.has('0') ? '0' : undefined;
+          for (const part of parts) {
+            if (textureKeys.has(part.texture)) {
+              continue;
+            }
+            const stripped = part.texture.startsWith('m_') ? part.texture.slice(2) : part.texture;
+            if (textureKeys.has(stripped)) {
+              part.texture = stripped; continue;
+            }
+            const noHash = stripped.startsWith('#') ? stripped.slice(1) : stripped;
+            if (textureKeys.has(noHash)) {
+              part.texture = noHash; continue;
+            }
+            if (defaultKey) {
+              part.texture = defaultKey;
+            }
+          }
+
+          // Ensure declared textures are loaded into the atlas so custom meshes pick them up.
+          for (const tex of Object.values(modelJson.textures ?? {})) {
+            if (!tex || typeof tex !== 'string') {
+              continue;
+            }
+            if (tex.startsWith('#')) {
+              continue;
+            }
+            await this.loadTexture(tex);
+          }
+
+          this.fetchedBlockModels.set(cleanPath, {
+            ...modelJson,
+            elements: undefined,
+            customMeshParts: parts
+          });
+
+          // Ensure parent is loaded (often contains texture definitions)
+          if (modelJson.parent) {
+            await this.loadModelRecursive(modelJson.parent);
+          }
+          // Apply patches after parent load for OBJ-backed models as well
+          this.patchFunnelFlap(modelJson, cleanPath);
+          this.patchTunnelFlaps(modelJson, cleanPath);
+        } else {
+          console.warn(`Failed to load OBJ: ${objUrl}`);
+          this.fetchedBlockModels.set(cleanPath, { elements: [] });
+        }
+        return;
+      }
+
+      // Ensure parents are available before mutating geometry so inheritance works.
+      // 1. Check parent
+      if (modelJson.parent) {
+        await this.loadModelRecursive(modelJson.parent);
+      }
+
+      this.flattenCompositeChildren(modelJson);
+
+      // 2. Apply geometry patches after parent load
+      this.patchFunnelFlap(modelJson, cleanPath);
+      this.patchTunnelFlaps(modelJson, cleanPath);
+      await this.patchKineticPoses(modelJson, cleanPath);
+      await this.ensureFactoryGaugeGeometry(modelJson, cleanPath);
+
+      this.fetchedBlockModels.set(cleanPath, modelJson);
+
+      // 3. Check textures
+      if (modelJson.textures) {
+        for (const key in modelJson.textures) {
+          const texturePath = modelJson.textures[key];
+          if (texturePath.startsWith('#')) {
+            continue;
+          } // Reference to another variable
+
+          await this.loadTexture(texturePath);
+        }
+      }
+    } else {
+      const synthetic = this.buildFunnelFallback(cleanPath);
+      if (synthetic) {
+        this.flattenCompositeChildren(synthetic);
+        this.fetchedBlockModels.set(cleanPath, synthetic);
+        if (synthetic.parent) {
+          await this.loadModelRecursive(synthetic.parent);
+        }
+        if (synthetic.textures) {
+          for (const key in synthetic.textures) {
+            const tex = synthetic.textures[key];
+            if (tex && typeof tex === 'string' && !tex.startsWith('#')) {
+              await this.loadTexture(tex);
+            }
+          }
+        }
+        return;
+      }
+      // Try a generic fallback: if a smart_* model is missing, reuse the base model without the smart_ prefix.
+      if (cleanPath.includes('smart_')) {
+        const fallbackPath = cleanPath.replace('smart_', '');
+        const fallbackUrl = `${this.assetsBase}/models/${fallbackPath.replace('create:', '')}.json`;
+        const fallbackJson = await this.fetchJson(fallbackUrl);
+        if (fallbackJson) {
+          console.warn(`[CreateModLoader] Missing ${cleanPath}, using fallback ${fallbackPath}`);
+          this.flattenCompositeChildren(fallbackJson);
+          this.fetchedBlockModels.set(cleanPath, fallbackJson);
+          if (fallbackJson.parent) {
+            await this.loadModelRecursive(fallbackJson.parent);
+          }
+          if (fallbackJson.textures) {
+            for (const key in fallbackJson.textures) {
+              const texturePath = fallbackJson.textures[key];
+              if (texturePath.startsWith('#')) {
+                continue;
+              }
+              await this.loadTexture(texturePath);
+            }
+          }
+          return;
+        }
+      }
+
+      // Try generated if main failed? usually models are in main/resources
+      this.missingResources.add(`Model: ${cleanPath}`);
+    }
+  }
+
+  private async patchKineticPoses (modelJson: any, cleanPath: string) {
+    // Mechanical Arm: use the folded item pose for the body, and publish the cog as a separate model for spinning.
+    if (cleanPath === 'create:block/mechanical_arm/block') {
+      await this.loadModelRecursive('create:block/mechanical_arm/item');
+      const itemModel = this.fetchedBlockModels.get('create:block/mechanical_arm/item');
+      const { bodyElements, cogElements, textures } = this.splitMechanicalArmElements(itemModel);
+      if (bodyElements.length) {
+        modelJson.elements = this.translateElements(bodyElements, 0, 16, 0);
+        if (textures) {
+          modelJson.textures = { ...(modelJson.textures ?? {}), ...textures };
+        }
+      }
+      if (cogElements.length && !this.fetchedBlockModels.has('create:block/mechanical_arm/cog')) {
+        this.fetchedBlockModels.set('create:block/mechanical_arm/cog', {
+          parent: 'block/block',
+          elements: this.translateElements(cogElements, 0, 16, 0),
+          textures: { ...textures }
+        });
+      }
+    }
+
+    // Mechanical Crafter gears are attached via blockstate mutation (see injectMechanicalCrafterGears).
+  }
+
+  private async ensureFactoryGaugeGeometry (modelJson: any, cleanPath: string) {
+    if (cleanPath !== 'create:block/factory_gauge/block') {
+      return;
+    }
+    if (Array.isArray(modelJson.elements) && modelJson.elements.length > 0) {
+      return;
+    }
+    const panelId = 'create:block/factory_gauge/panel';
+    await this.loadModelRecursive(panelId);
+    const panel = this.fetchedBlockModels.get(panelId);
+    if (!panel?.elements) {
+      return;
+    }
+    modelJson.elements = JSON.parse(JSON.stringify(panel.elements));
+    modelJson.textures = { ...(modelJson.textures ?? {}), ...(panel.textures ?? {}) };
+    if (!modelJson.display && panel.display) {
+      modelJson.display = panel.display;
+    }
+  }
+
+  private patchFunnelFlap (modelJson: any, cleanPath: string) {
+    const flapIds = new Set([
+      'create:block/funnel/flap',
+      'create:block/belt_funnel/flap'
+    ]);
+    if (!flapIds.has(cleanPath)) {
+      return;
+    }
+    if (!Array.isArray(modelJson.elements) || modelJson.elements.length === 0) {
+      return;
+    }
+    // If already expanded, skip
+    if (modelJson.elements.length > 1) {
+      return;
+    }
+    const base = JSON.parse(JSON.stringify(modelJson.elements[0]));
+    const clones = [base];
+    for (let i = 1; i < 4; i++) {
+      const c = JSON.parse(JSON.stringify(base));
+      c.from[0] -= 3 * i;
+      c.to[0] -= 3 * i;
+      if (c.rotation?.origin) {
+        c.rotation.origin[0] -= 3 * i;
+      }
+      c.name = `${base.name || 'flap'}_${i}`;
+      clones.push(c);
+    }
+    modelJson.elements = clones;
+  }
+
+  private patchTunnelFlaps (modelJson: any, cleanPath: string) {
+    // Belt tunnel block models (and their tunneled children) lack flaps; inject static flaps so visuals match Create.
+    if (!cleanPath.startsWith('create:block/belt_tunnel/') && !cleanPath.startsWith('create:block/tunnel/')) {
+      return;
+    }
+
+    // If this model has no elements, try cloning from its parent so we can inject flaps.
+    if (!Array.isArray(modelJson.elements) || modelJson.elements.length === 0) {
+      if (modelJson.parent) {
+        const parentId = this.normalizePath(modelJson.parent);
+        const parent = this.fetchedBlockModels.get(parentId);
+        if (parent?.elements) {
+          modelJson.elements = JSON.parse(JSON.stringify(parent.elements));
+        }
+      }
+    }
+
+    if (!Array.isArray(modelJson.elements) || modelJson.elements.length === 0) {
+      return;
+    }
+
+    if (modelJson.elements.some((e: any) => (e.name ?? '').toLowerCase().includes('flap'))) {
+      return;
+    }
+    // Prefer the dark funnel back texture; alias it into the model so the atlas loads it.
+    let texKey = '#back';
+    if (!modelJson.textures?.back) {
+      const textures = modelJson.textures ?? (modelJson.textures = {});
+      textures._flap = textures._flap ?? 'create:block/funnel/funnel_back';
+      texKey = '#_flap';
+    }
+    const makeFlap = (from: number[], to: number[], rotateDown: number, rotateUp: number) => ({
+      name: 'Flap',
+      from,
+      to,
+      rotation: { angle: 0, axis: 'y', origin: [8, 8, 8] },
+      faces: {
+        north: { uv: [6, 8, 6.5, 14.5], texture: texKey },
+        east: { uv: [6, 8, 7.5, 14.5], rotation: 180, texture: texKey },
+        south: { uv: [7, 8, 7.5, 14.5], texture: texKey },
+        west: { uv: [6, 8, 7.5, 14.5], texture: texKey },
+        up: { uv: [6, 8.5, 7.5, 8], rotation: rotateUp, texture: texKey },
+        down: { uv: [6, 14, 7.5, 14.5], rotation: rotateDown, texture: texKey }
+      }
+    });
+    const segments = [
+      [2, 5],
+      [5, 8],
+      [8, 11],
+      [11, 14]
+    ];
+    const before = modelJson.elements.length;
+    for (const [z0, z1] of segments) {
+      modelJson.elements.push(makeFlap([0.5, -2.5, z0], [1.5, 10.5, z1], 270, 90));
+    }
+    for (const [z0, z1] of segments.reverse()) {
+      modelJson.elements.push(makeFlap([14.5, -2.5, z0], [15.5, 10.5, z1], 90, 270));
+    }
+    const added = modelJson.elements.length - before;
+  }
+
+  private translateElements (elements: any[], dx: number, dy: number, dz: number) {
+    for (const el of elements) {
+      if (el.from) {
+        el.from = [el.from[0] + dx, el.from[1] + dy, el.from[2] + dz];
+      }
+      if (el.to) {
+        el.to = [el.to[0] + dx, el.to[1] + dy, el.to[2] + dz];
+      }
+      if (el.rotation?.origin) {
+        el.rotation.origin = [el.rotation.origin[0] + dx, el.rotation.origin[1] + dy, el.rotation.origin[2] + dz];
+      }
+      if (Array.isArray(el.children)) {
+        this.translateElements(el.children as any[], dx, dy, dz);
+      }
+    }
+    return elements;
+  }
+
+  private splitMechanicalArmElements (itemModel: any) {
+    const elements = Array.isArray(itemModel?.elements) ? itemModel.elements as any[] : [];
+    const isCog = (el: any) => (el.name ?? '').toLowerCase().includes('gear');
+    const clone = (el: any) => JSON.parse(JSON.stringify(el));
+    const cogElements = elements.filter(isCog).map(clone);
+    const bodyElements = elements.filter(el => !isCog(el)).map(clone);
+    return { bodyElements, cogElements, textures: itemModel?.textures ?? {} };
+  }
+
+  private async injectMechanicalCrafterGears (def: any) {
+    if ((def as any)._gearsInjected) {
+      return;
+    }
+    await this.loadModelRecursive('create:block/mechanical_crafter/item');
+    const itemModel = this.fetchedBlockModels.get('create:block/mechanical_crafter/item');
+    if (!itemModel?.elements) {
+      return;
+    }
+    const gears = (itemModel.elements as any[]).filter(el => (el.name ?? '').toLowerCase().includes('gear'));
+    if (!gears.length) {
+      return;
+    }
+
+    // Build horizontal and vertical gear models
+    const horizontalId = 'create:block/mechanical_crafter/gears_horizontal';
+    const verticalId = 'create:block/mechanical_crafter/gears_vertical';
+    const horizModel = { parent: 'block/block', elements: JSON.parse(JSON.stringify(gears)), textures: { ...(itemModel.textures ?? {}) } };
+    const vertModel = { parent: 'block/block', elements: this.rotateElementsX90(JSON.parse(JSON.stringify(gears))), textures: { ...(itemModel.textures ?? {}) } };
+    this.fetchedBlockModels.set(horizontalId, horizModel);
+    this.fetchedBlockModels.set(verticalId, vertModel);
+
+    const ensureMultipart = () => {
+      if (!def.multipart) {
+        def.multipart = [];
+      }
+      if (def.variants) {
+        for (const [key, variant] of Object.entries(def.variants)) {
+          const when: Record<string, string> = {};
+          key.split(',').forEach(pair => {
+            const [k, v] = pair.split('=');
+            if (k && v) {
+              when[k] = v;
+            }
+          });
+          const entries = Array.isArray(variant) ? variant : [variant];
+          for (const entry of entries) {
+            def.multipart.push({ apply: entry, when: Object.keys(when).length ? when : undefined });
+          }
+        }
+        delete def.variants;
+      }
+    };
+
+    ensureMultipart();
+
+    const pickGearModel = (when: Record<string, string> | undefined) => {
+      return horizontalId;
+    };
+
+    const baseParts = [...def.multipart]; // snapshot to avoid iterating over appended parts
+    for (const part of baseParts as any[]) {
+      if (!part.apply) {
+        continue;
+      }
+      const gearModel = pickGearModel(part.when);
+      const apply = Array.isArray(part.apply) ? part.apply[0] : part.apply;
+      const facing = (part.when as any)?.facing as string | undefined;
+      let extraX = 0;
+      const extraY = 0;
+      if (facing === 'down') {
+        extraX = 180;
+      } else if (facing === 'up') {
+        extraX = 0;
+      } else {
+        extraX = 90;
+      }
+      const rotX = ((apply?.x ?? 0) + extraX) % 360;
+      const rotY = ((apply?.y ?? 0) + extraY) % 360;
+      def.multipart.push({ apply: { model: gearModel, x: rotX, y: rotY, uvlock: apply?.uvlock }, when: part.when });
+    }
+    (def as any)._gearsInjected = true;
+  }
+
+  private async injectMechanicalArmCog (def: any) {
+    if ((def as any)._armCogInjected) {
+      return;
+    }
+    await this.loadModelRecursive('create:block/mechanical_arm/item');
+    const itemModel = this.fetchedBlockModels.get('create:block/mechanical_arm/item');
+    const { cogElements, textures } = this.splitMechanicalArmElements(itemModel);
+    if (!cogElements.length) {
+      return;
+    }
+
+    const cogModelId = 'create:block/mechanical_arm/cog';
+    if (!this.fetchedBlockModels.has(cogModelId)) {
+      this.fetchedBlockModels.set(cogModelId, {
+        parent: 'block/block',
+        elements: this.translateElements(cogElements, 0, 16, 0),
+        textures: { ...textures }
+      });
+    }
+
+    const parseWhen = (key: string): Record<string, string> | undefined => {
+      if (!key) {
+        return undefined;
+      }
+      const when: Record<string, string> = {};
+      for (const pair of key.split(',')) {
+        if (!pair) {
+          continue;
+        }
+        const [k, v] = pair.split('=');
+        if (k && v) {
+          when[k] = v;
+        }
+      }
+      return Object.keys(when).length ? when : undefined;
+    };
+
+    const ensureMultipart = () => {
+      if (!def.multipart) {
+        def.multipart = [];
+      }
+      if (def.variants) {
+        for (const [key, variant] of Object.entries(def.variants)) {
+          const when = parseWhen(key);
+          const entries = Array.isArray(variant) ? variant : [variant];
+          for (const entry of entries) {
+            def.multipart.push({ apply: entry, when });
+          }
+        }
+        delete def.variants;
+      }
+    };
+
+    ensureMultipart();
+
+    const baseParts = [...def.multipart];
+    for (const part of baseParts as any[]) {
+      if (!part.apply) {
+        continue;
+      }
+      const applies = Array.isArray(part.apply) ? part.apply : [part.apply];
+      for (const apply of applies) {
+        const rotX = (apply?.x ?? 0) % 360;
+        const rotY = (apply?.y ?? 0) % 360;
+        def.multipart.push({ apply: { model: cogModelId, x: rotX, y: rotY, uvlock: apply?.uvlock }, when: part.when });
+      }
+    }
+
+    (def as any)._armCogInjected = true;
+  }
+
+  private buildFunnelFallback (modelId: string): any | null {
+    if (!modelId.startsWith('create:block/')) {
+      return null;
+    }
+    const name = modelId.substring('create:block/'.length);
+    if (!name.includes('funnel')) {
+      return null;
+    }
+
+    const textures = {
+      back: 'create:block/funnel/funnel_open',
+      base: 'create:block/funnel/funnel_open',
+      direction: name.includes('push') ? 'create:block/funnel/funnel_closed' : 'create:block/funnel/funnel_open',
+      redstone: 'create:block/funnel/funnel_closed',
+      particle: 'create:block/brass_block',
+      block: 'create:block/brass_block'
+    };
+
+    if (name.includes('belt_funnel')) {
+      let parent = 'create:block/belt_funnel/block_retracted';
+      if (name.includes('extended')) {
+        parent = 'create:block/belt_funnel/block_extended';
+      } else if (name.includes('pulling')) {
+        parent = 'create:block/belt_funnel/block_pulling';
+      } else if (name.includes('pushing')) {
+        parent = 'create:block/belt_funnel/block_pushing';
+      }
+      return { parent, textures };
+    }
+
+    let parent = 'create:block/funnel/block_horizontal';
+    if (name.includes('vertical')) {
+      parent = name.includes('filterless') ? 'create:block/funnel/block_vertical_filterless' : 'create:block/funnel/block_vertical';
+    }
+
+    return { parent, textures };
+  }
+
+  private async loadTexture (texturePath: string) {
+    const cleanPath = this.normalizePath(texturePath);
+    // cleanPath e.g. "create:block/axis"
+
+    if (!cleanPath.startsWith('create:')) {
+      return;
+    }
+
+    if (this.fetchedTextures.has(cleanPath)) {
+      return;
+    }
+
+    const relativePath = cleanPath.replace('create:', '');
+    const url = `${this.assetsBase}/textures/${relativePath}.png`;
+
+    try {
+      const blob = await this.fetchBlob(url);
+      if (blob) {
+        this.fetchedTextures.set(cleanPath, blob);
+        await this.loadFlowTextureForFluid(cleanPath);
+      } else {
+        this.missingResources.add(`Texture: ${cleanPath}`);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  private async loadFlowTextureForFluid (stillPath: string) {
+    if (!stillPath.includes('/fluid/') || !stillPath.includes('_still')) {
+      return;
+    }
+    const flowPath = stillPath.replace('_still', '_flow');
+    if (this.fetchedTextures.has(flowPath)) {
+      return;
+    }
+    await this.loadTexture(flowPath);
+  }
+
+  private extractModelsFromDefinition (def: any): string[] {
+    const models = new Set<string>();
+    if (def.variants) {
+      for (const key in def.variants) {
+        const variant = def.variants[key];
+        if (Array.isArray(variant)) {
+          variant.forEach(v => {
+            if (v.model) {
+              models.add(v.model);
+            }
+          });
+        } else if (variant.model) {
+          models.add(variant.model);
+        }
+      }
+    }
+    if (def.multipart) {
+      def.multipart.forEach((part: any) => {
+        if (part.apply) {
+          const apply = part.apply;
+          if (Array.isArray(apply)) {
+            apply.forEach(v => {
+              if (v.model) {
+                models.add(v.model);
+              }
+            });
+          } else if (apply.model) {
+            models.add(apply.model);
+          }
+        }
+      });
+    }
+    return Array.from(models);
+  }
+
+  private normalizePath (path: string): string {
+    if (!path.includes(':')) {
+      return 'minecraft:' + path;
+    }
+    return path;
+  }
+
+  private async fetchJson (url: string): Promise<any | null> {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        return null;
+      }
+      return await res.json();
+    } catch (e) {
+      console.error(`Fetch error for ${url}`, e);
+      return null;
+    }
+  }
+
+  private async fetchText (url: string): Promise<string | null> {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        return null;
+      }
+      return await res.text();
+    } catch (e) {
+      console.error(`Fetch error for ${url}`, e);
+      return null;
+    }
+  }
+
+  private async fetchBlob (url: string): Promise<Blob | null> {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) {
+        return null;
+      }
+      return await res.blob();
+    } catch (e) {
+      console.error(`Fetch error for ${url}`, e);
+      return null;
+    }
+  }
+}
