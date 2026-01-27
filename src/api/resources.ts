@@ -66,9 +66,9 @@ export async function loadVanillaAssets (options: ResourceLoadOptions = {}): Pro
   const atlasBase = options.atlasBase ?? DEFAULT_ATLAS_BASE;
 
   const [blockStates, blockModels, uvMap, atlasImage] = await Promise.all([
-    fetchJsonLocalFirst(fetchFn, `${vanillaBase}blockstates.min.json`, `${summaryBase}assets/block_definition/data.min.json`),
-    fetchJsonLocalFirst(fetchFn, `${vanillaBase}models.min.json`, `${summaryBase}assets/model/data.min.json`),
-    fetchJsonLocalFirst(fetchFn, `${vanillaBase}atlas.uv.min.json`, `${atlasBase}all/data.min.json`),
+    fetchJsonLocalFirst(fetchFn, `${vanillaBase}block_definition.json`, `${summaryBase}assets/block_definition/data.min.json`),
+    fetchJsonLocalFirst(fetchFn, `${vanillaBase}model.json`, `${summaryBase}assets/model/data.min.json`),
+    fetchJsonLocalFirst(fetchFn, `${vanillaBase}atlas.json`, `${atlasBase}all/data.min.json`),
     fetchImageLocalFirst(fetchFn, `${vanillaBase}atlas.png`, `${atlasBase}all/atlas.png`)
   ]);
 
