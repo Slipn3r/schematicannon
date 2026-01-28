@@ -11,11 +11,17 @@ export function parseObj (objData: string): ObjMeshPart[] {
   const uvs: [number, number][] = [];
   const normals: Vector[] = [];
 
-  // Preliminary pass to detect scale
+  // Preliminary pass to detect scale, ignoring Bounding objects
   let maxCoord = 0;
+  let isCheckingScaleForObject = true;
   for (const line of lines) {
-    if (line.startsWith('v ')) {
-      const parts = line.trim().split(/\s+/);
+    const parts = line.trim().split(/\s+/);
+    if (parts.length === 0) continue;
+    
+    if (parts[0] === 'o' || parts[0] === 'g') {
+      const name = parts[1] || '';
+      isCheckingScaleForObject = !name.startsWith('Bounding');
+    } else if (parts[0] === 'v' && isCheckingScaleForObject) {
       const x = Math.abs(parseFloat(parts[1]!));
       const y = Math.abs(parseFloat(parts[2]!));
       const z = Math.abs(parseFloat(parts[3]!));
