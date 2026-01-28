@@ -4,12 +4,13 @@ import { mergeAtlases } from './atlas_merger.js';
 import type { Structure, TextureAtlas } from 'deepslate';
 import { CreateModLoader, type CreateModLoaderOptions, type LoadedAssets } from './create_loader.js';
 import { loadCreateModelManifest, MODEL_MANIFEST_FILE } from './create_model_manifest.js';
+import { RawBlockState, RawBlockModel } from '../types/assets.js';
 
 type FetchFn = typeof fetch;
 
 export interface VanillaAssetBundle {
-  blockStates: Record<string, any>;
-  blockModels: Record<string, any>;
+  blockStates: Record<string, RawBlockState>;
+  blockModels: Record<string, RawBlockModel>;
   uvMap: Record<string, [number, number, number, number]>;
   atlasImage: HTMLImageElement;
 }

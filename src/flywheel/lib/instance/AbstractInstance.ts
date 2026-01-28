@@ -5,7 +5,7 @@ import { Instancer } from '../../api/instance/Instancer';
 export abstract class AbstractInstance implements Instance {
   protected pos: BlockPos = BlockPos.ZERO;
 
-  constructor (protected readonly instancer: Instancer<any>) {
+  constructor (protected readonly instancer: Instancer<Instance>) {
   }
 
   setPosition (pos: BlockPos): Instance {

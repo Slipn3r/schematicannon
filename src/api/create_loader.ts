@@ -2,7 +2,7 @@ import { BlockDefinition, BlockModel } from 'deepslate';
 import { Identifier } from 'deepslate/core';
 import { createBlockModelFromJson } from './deepslate_extensions';
 import { parseObj } from './obj_loader.js';
-import { RawBlockModel, RawBlockState, RawModelElement, RawMultipartWhen } from 'src/types/assets.js';
+import { RawBlockModel, RawBlockState, RawModelElement, RawMultipartWhen, RawBlockStateVariant, RawMultipartCase } from '../types/assets.js';
 
 const DEFAULT_ASSETS_BASE = './assets/create';
 const SUBPART_TOKENS = ['head', 'blade', 'pole', 'cog', 'cogwheel', 'pointer', 'flap', 'hand', 'fan', 'shaft', 'arm', 'middle', 'hose', 'top', 'belt', 'claw', 'body', 'wheel', 'roller', 'valve', 'handle', 'casing', 'guard'];
@@ -226,7 +226,7 @@ export class CreateModLoader {
     return candidates;
   }
 
-  private autoAttachSubparts (def: any, blockId: string) {
+  private autoAttachSubparts (def: RawBlockState, blockId: string) {
     // Limit auto-attachments to known safe blocks to avoid mass over-attachment.
     if (!AUTO_SUBPART_BLOCKS.some(k => blockId.includes(k))) {
       return;
@@ -250,10 +250,10 @@ export class CreateModLoader {
     };
 
     const referenced = new Set<string>();
-    const modelUsage = new Map<string, { apply: any; when: Record<string, string> | undefined }[]>();
-    const multiparts: any[] = [];
+    const modelUsage = new Map<string, { apply: RawBlockStateVariant; when: Record<string, string> | undefined }[]>();
+    const multiparts: RawMultipartCase[] = [];
 
-    const recordUsage = (model: string, when: Record<string, string> | undefined, apply: any) => {
+    const recordUsage = (model: string, when: Record<string, string> | undefined, apply: RawBlockStateVariant) => {
       const norm = this.normalizePath(model);
       referenced.add(norm);
       if (!modelUsage.has(norm)) {
@@ -262,7 +262,7 @@ export class CreateModLoader {
       modelUsage.get(norm)!.push({ apply: apply ? JSON.parse(JSON.stringify(apply)) : undefined, when: when ? JSON.parse(JSON.stringify(when)) : undefined });
     };
 
-    const pushMultipart = (apply: any, when: any) => {
+    const pushMultipart = (apply: RawBlockStateVariant, when: any) => {
       multiparts.push({ apply, when });
       if (apply?.model) {
         recordUsage(apply.model, when, apply);
@@ -314,17 +314,18 @@ export class CreateModLoader {
         }
 
         for (const { apply: baseApply, when } of whenList) {
-          const apply: any = { model: candidate };
+          const apply: RawBlockStateVariant = { model: candidate };
           if (baseApply) {
-            for (const prop of ['x', 'y', 'z', 'uvlock']) {
+            for (const prop of ['x', 'y', 'z', 'uvlock'] as const) {
               if (prop in baseApply) {
-                apply[prop] = (baseApply as any)[prop];
+                // @ts-expect-error type safety
+                apply[prop] = baseApply[prop];
               }
             }
           }
           // Pump cog orientation should align its axis to the pump facing (horizontal pumps need vertical cogs).
           if (blockId.includes('mechanical_pump') && candidate.includes('mechanical_pump/cog')) {
-            const facing = (when as any)?.facing as string | undefined;
+            const facing = when?.facing;
             const norm = (v: number) => ((v % 360) + 360) % 360;
             switch (facing) {
               case 'north': apply.x = 0; apply.y = 0; break;
@@ -338,7 +339,7 @@ export class CreateModLoader {
           }
           // Drill head should align to facing rather than inheriting casing x/y which aim the body.
           if (blockId.includes('mechanical_drill') && candidate.includes('mechanical_drill/head')) {
-            const facing = (when as any)?.facing as string | undefined;
+            const facing = when?.facing;
             const norm = (v: number) => ((v % 360) + 360) % 360;
             switch (facing) {
               case 'north': apply.x = 0; apply.y = norm(0); break;
@@ -436,7 +437,7 @@ export class CreateModLoader {
     }
   }
 
-  private patchBeltDefinition (def: any) {
+  private patchBeltDefinition (def: RawBlockState) {
     if (!def.variants) {
       return;
     }
@@ -530,7 +531,7 @@ export class CreateModLoader {
     def.multipart = multipart;
   }
 
-  private patchEncasedCogDefinition (def: any, id: string) {
+  private patchEncasedCogDefinition (def: RawBlockState, id: string) {
     if (!def.multipart) {
       def.multipart = [];
     }
@@ -570,7 +571,7 @@ export class CreateModLoader {
     }
   }
 
-  private patchEncasedPipeDefinition (def: any) {
+  private patchEncasedPipeDefinition (def: RawBlockState) {
     if (!def.multipart) {
       def.multipart = [];
     }
@@ -741,7 +742,7 @@ export class CreateModLoader {
     return newEl;
   }
 
-  private patchFluidPipeConnectionRules (def: any) {
+  private patchFluidPipeConnectionRules (def: RawBlockState) {
     if (!def.multipart) {
       def.multipart = [];
     }
@@ -769,7 +770,7 @@ export class CreateModLoader {
     }
   }
 
-  private patchPipeCoreFaces (json: any) {
+  private patchPipeCoreFaces (json: RawBlockModel) {
     if (!json.elements) {
       return;
     }
@@ -800,7 +801,7 @@ export class CreateModLoader {
     }
   }
 
-  private patchPipeModelLimbs (json: any, modelId: string) {
+  private patchPipeModelLimbs (json: RawBlockModel, modelId: string) {
     const name = modelId.split('/').pop()?.replace('.json', '') || '';
 
     // Parse components: e.g. "lu_x" -> components="lu", axis="x"
@@ -880,15 +881,15 @@ export class CreateModLoader {
     }
   }
 
-  private addPipeLimb (json: any, dir: string) {
+  private addPipeLimb (json: RawBlockModel, dir: string) {
     // Define limb geo
-    const lim = { from: [0, 0, 0], to: [0, 0, 0], faces: {} as any };
+    const lim: RawModelElement = { from: [0, 0, 0], to: [0, 0, 0], faces: {} };
     // Reuse whatever UV/texture the core already declared to avoid sampling missing atlas space.
     const core = Array.isArray(json.elements)
-      ? json.elements.find((e: any) => e.from && e.to && e.from[0] === 4 && e.from[1] === 4 && e.from[2] === 4 && e.to[0] === 12 && e.to[1] === 12 && e.to[2] === 12)
+      ? (json.elements as RawModelElement[]).find(e => e.from && e.to && e.from[0] === 4 && e.from[1] === 4 && e.from[2] === 4 && e.to[0] === 12 && e.to[1] === 12 && e.to[2] === 12)
       : undefined;
-    const pickFace = (name: string) => core?.faces ? core.faces[name] as any : undefined;
-    const sampleFace: any = pickFace(dir) || core?.faces ? (Object.values(core?.faces ?? {})[0] as any) : undefined;
+    const pickFace = (name: string) => core?.faces ? (core.faces as any)[name] : undefined;
+    const sampleFace: any = pickFace(dir) || (core?.faces ? (Object.values(core?.faces ?? {})[0] as any) : undefined);
     const texRef = sampleFace?.texture ?? '#0';
     const uvForDir = (name: string) => {
       const face = pickFace(name);
@@ -976,7 +977,7 @@ export class CreateModLoader {
     }
   }
 
-  private flattenCompositeChildren (modelJson: any) {
+  private flattenCompositeChildren (modelJson: RawBlockModel) {
     if (!modelJson?.children || typeof modelJson.children !== 'object') {
       return;
     }
@@ -1078,7 +1079,7 @@ export class CreateModLoader {
     const relativePath = cleanPath.replace('create:', '');
     const url = `${this.assetsBase}/models/${relativePath}.json`;
 
-    const modelJson = await this.fetchJson(url);
+    const modelJson = await this.fetchJson(url) as RawBlockModel | undefined;
     if (modelJson) {
       if (modelJson.parent) {
         await this.loadModelRecursive(modelJson.parent);
@@ -1249,6 +1250,7 @@ export class CreateModLoader {
       this.patchFunnelFlap(modelJson, cleanPath);
       this.patchTunnelFlaps(modelJson, cleanPath);
       await this.patchKineticPoses(modelJson, cleanPath);
+      this.patchMechanicalRoller(modelJson, cleanPath);
       await this.ensureFactoryGaugeGeometry(modelJson, cleanPath);
 
       this.fetchedBlockModels.set(cleanPath, modelJson);
@@ -1312,7 +1314,7 @@ export class CreateModLoader {
     }
   }
 
-  private async patchKineticPoses (modelJson: any, cleanPath: string) {
+  private async patchKineticPoses (modelJson: RawBlockModel, cleanPath: string) {
     // Mechanical Arm: use the folded item pose for the body, and publish the cog as a separate model for spinning.
     if (cleanPath === 'create:block/mechanical_arm/block') {
       await this.loadModelRecursive('create:block/mechanical_arm/item');
@@ -1336,7 +1338,7 @@ export class CreateModLoader {
     // Mechanical Crafter gears are attached via blockstate mutation (see injectMechanicalCrafterGears).
   }
 
-  private async ensureFactoryGaugeGeometry (modelJson: any, cleanPath: string) {
+  private async ensureFactoryGaugeGeometry (modelJson: RawBlockModel, cleanPath: string) {
     if (cleanPath !== 'create:block/factory_gauge/block') {
       return;
     }
@@ -1356,7 +1358,7 @@ export class CreateModLoader {
     }
   }
 
-  private patchFunnelFlap (modelJson: any, cleanPath: string) {
+  private patchFunnelFlap (modelJson: RawBlockModel, cleanPath: string) {
     const flapIds = new Set([
       'create:block/funnel/flap',
       'create:block/belt_funnel/flap'
@@ -1386,7 +1388,7 @@ export class CreateModLoader {
     modelJson.elements = clones;
   }
 
-  private patchTunnelFlaps (modelJson: any, cleanPath: string) {
+  private patchTunnelFlaps (modelJson: RawBlockModel, cleanPath: string) {
     // Belt tunnel block models (and their tunneled children) lack flaps; inject static flaps so visuals match Create.
     if (!cleanPath.startsWith('create:block/belt_tunnel/') && !cleanPath.startsWith('create:block/tunnel/')) {
       return;
@@ -1447,7 +1449,52 @@ export class CreateModLoader {
     const added = modelJson.elements.length - before;
   }
 
-  private translateElements (elements: any[], dx: number, dy: number, dz: number) {
+  private patchMechanicalRoller (model: RawBlockModel, cleanPath: string) {
+    if ((!cleanPath.includes('mechanical_roller') && !cleanPath.includes('crushing_wheel')) || !cleanPath.includes('wheel')) {
+      return;
+    }
+    // Only target the specific mechanical roller wheel which is missing/offset
+    if (!cleanPath.includes('mechanical_roller')) {
+      return;
+    }
+
+    if (!model.elements) {
+      return;
+    }
+
+    for (const part of model.elements) {
+      if ('mesh' in part && part.mesh && part.mesh.quads) {
+        const visited = new Set<any>();
+        for (const quad of part.mesh.quads) {
+          const processVertex = (vert: any) => {
+            if (!vert || !vert.pos || visited.has(vert)) {
+              return;
+            }
+            visited.add(vert);
+            const p = vert.pos;
+            const oldX = p.x;
+            const oldZ = p.z;
+            p.x = oldZ;
+            p.z = 16 - oldX;
+            p.y -= 28;
+            p.z += 2;
+            if (vert.normal) {
+              const n = vert.normal;
+              const nx = n.x;
+              n.x = n.z;
+              n.z = -nx;
+            }
+          };
+          processVertex(quad.p0);
+          processVertex(quad.p1);
+          processVertex(quad.p2);
+          processVertex(quad.p3);
+        }
+      }
+    }
+  }
+
+  private translateElements (elements: RawModelElement[], dx: number, dy: number, dz: number) {
     for (const el of elements) {
       if (el.from) {
         el.from = [el.from[0] + dx, el.from[1] + dy, el.from[2] + dz];
@@ -1459,16 +1506,16 @@ export class CreateModLoader {
         el.rotation.origin = [el.rotation.origin[0] + dx, el.rotation.origin[1] + dy, el.rotation.origin[2] + dz];
       }
       if (Array.isArray(el.children)) {
-        this.translateElements(el.children as any[], dx, dy, dz);
+        this.translateElements(el.children as RawModelElement[], dx, dy, dz);
       }
     }
     return elements;
   }
 
-  private splitMechanicalArmElements (itemModel: any) {
-    const elements = Array.isArray(itemModel?.elements) ? itemModel.elements as any[] : [];
-    const isCog = (el: any) => (el.name ?? '').toLowerCase().includes('gear');
-    const clone = (el: any) => JSON.parse(JSON.stringify(el));
+  private splitMechanicalArmElements (itemModel: RawBlockModel) {
+    const elements = Array.isArray(itemModel?.elements) ? itemModel.elements as RawModelElement[] : [];
+    const isCog = (el: RawModelElement) => (el.name ?? '').toLowerCase().includes('gear');
+    const clone = (el: RawModelElement) => JSON.parse(JSON.stringify(el));
     const cogElements = elements.filter(isCog).map(clone);
     const bodyElements = elements.filter(el => !isCog(el)).map(clone);
     return { bodyElements, cogElements, textures: itemModel?.textures ?? {} };

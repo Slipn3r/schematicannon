@@ -16,8 +16,10 @@ export function parseObj (objData: string): ObjMeshPart[] {
   let isCheckingScaleForObject = true;
   for (const line of lines) {
     const parts = line.trim().split(/\s+/);
-    if (parts.length === 0) continue;
-    
+    if (parts.length === 0) {
+      continue;
+    }
+
     if (parts[0] === 'o' || parts[0] === 'g') {
       const name = parts[1] || '';
       isCheckingScaleForObject = !name.startsWith('Bounding');

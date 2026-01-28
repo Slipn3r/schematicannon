@@ -4,6 +4,7 @@ import type { InstanceType } from '../../api/instance/InstanceType';
 import { GlBuffer } from '../gl/GlBuffer';
 
 export class InstancerImpl<D extends Instance> implements Instancer<D> {
+  public _model?: unknown;
   public data: Float32Array;
   private readonly instances: D[] = [];
   private dirty: boolean = false;

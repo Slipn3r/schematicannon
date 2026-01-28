@@ -7,6 +7,12 @@ import type { InstanceType } from './api/instance/InstanceType';
 import type { InstancerProvider } from './api/visualization/VisualizationContext';
 import { InstancerImpl } from './backend/instancing/InstancerImpl';
 
+interface ExtendedMesh extends Mesh {
+  colorOnly?: boolean;
+  colorAlpha?: number;
+  lineWidth?: number;
+}
+
 const VS_TRANSFORMED = `
   attribute vec4 vertPos;
   attribute vec2 texCoord;
@@ -119,7 +125,7 @@ const FS_COLOR = `
 `;
 
 export class Flywheel implements InstancerProvider {
-  private readonly instancers: Map<string, InstancerImpl<any>> = new Map();
+  private readonly instancers: Map<string, InstancerImpl<Instance>> = new Map();
   private readonly shader: ShaderProgram;
   private readonly lineShader: ShaderProgram;
   private readonly colorShader: ShaderProgram;
@@ -142,15 +148,15 @@ export class Flywheel implements InstancerProvider {
     let instancer = this.instancers.get(key);
     if (!instancer) {
       instancer = new InstancerImpl(type, this.gl);
-      (instancer as any)._model = model; // Hack to store model
-      this.instancers.set(key, instancer);
+      instancer._model = model;
+      this.instancers.set(key, (instancer as unknown) as InstancerImpl<Instance>);
     }
     return instancer;
   }
 
-  private getKey (type: InstanceType<any>, model: unknown): string {
+  private getKey (type: InstanceType<Instance>, model: unknown): string {
     // TODO: Better key
-    return `${type.format()}_${(model as any).id || 'unknown'}`;
+    return `${type.format()}_${(model as { id?: string }).id || 'unknown'}`;
   }
 
   render (viewMatrix: mat4, projMatrix: mat4) {
@@ -197,13 +203,13 @@ export class Flywheel implements InstancerProvider {
       }
 
       instancer.update();
-      const model = (instancer as any)._model as Mesh;
+      const model = instancer._model as ExtendedMesh;
       if (!model) {
         continue;
       }
 
       // Draw colored quads (overlays)
-      if ((model as any).colorOnly && model.quadVertices() > 0 && model.posBuffer && model.colorBuffer && model.indexBuffer) {
+      if (model.colorOnly && model.quadVertices() > 0 && model.posBuffer && model.colorBuffer && model.indexBuffer) {
         const program = this.colorShader.getProgram();
         gl.useProgram(program);
         const locView = gl.getUniformLocation(program, 'mView');
@@ -211,7 +217,7 @@ export class Flywheel implements InstancerProvider {
         const locAlpha = gl.getUniformLocation(program, 'uAlpha');
         gl.uniformMatrix4fv(locView, false, viewMatrix);
         gl.uniformMatrix4fv(locProj, false, projMatrix);
-        gl.uniform1f(locAlpha, (model as any).colorAlpha ?? 0.3);
+        gl.uniform1f(locAlpha, model.colorAlpha ?? 0.3);
 
         const locVert = gl.getAttribLocation(program, 'vertPos');
         const locColor = gl.getAttribLocation(program, 'vertColor');
@@ -306,7 +312,7 @@ export class Flywheel implements InstancerProvider {
 
         instancer.glBuffer.bind(gl.ARRAY_BUFFER);
         const locs = bindInstanceAttrs(program);
-        const width = (model as any).lineWidth ?? 1;
+        const width = model.lineWidth ?? 1;
         gl.lineWidth(width);
         this.ext.drawArraysInstancedANGLE(
           gl.LINES,
