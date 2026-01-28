@@ -27,9 +27,10 @@ export function parseObj (objData: string): ObjMeshPart[] {
   const parts: ObjMeshPart[] = [];
   let currentMaterial = 'particle'; // Default
   let currentMesh = new Mesh();
+  let ignoreCurrentObject = false;
 
   const flushPart = () => {
-    if (!currentMesh.isEmpty()) {
+    if (!ignoreCurrentObject && !currentMesh.isEmpty()) {
       parts.push({ mesh: currentMesh, texture: currentMaterial });
       currentMesh = new Mesh();
     }
@@ -42,7 +43,17 @@ export function parseObj (objData: string): ObjMeshPart[] {
     }
     const type = parts[0];
 
-    if (type === 'v') {
+    if (type === 'o' || type === 'g') {
+        flushPart();
+        // Ignore bounding boxes (Create mod convention)
+        if (parts[1]?.startsWith('Bounding')) {
+            ignoreCurrentObject = true;
+        } else {
+            ignoreCurrentObject = false;
+        }
+    } else if (ignoreCurrentObject) {
+         continue;
+    } else if (type === 'v') {
       positions.push(new Vector(
         parseFloat(parts[1]!) * scale,
         parseFloat(parts[2]!) * scale,

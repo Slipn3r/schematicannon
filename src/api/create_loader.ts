@@ -5,8 +5,8 @@ import { parseObj } from './obj_loader.js';
 import { RawBlockModel, RawBlockState, RawModelElement, RawMultipartWhen } from 'src/types/assets.js';
 
 const DEFAULT_ASSETS_BASE = './assets/create';
-const SUBPART_TOKENS = ['head', 'blade', 'pole', 'cog', 'cogwheel', 'pointer', 'flap', 'hand', 'fan', 'shaft', 'arm', 'middle', 'hose', 'top', 'belt', 'claw', 'body'];
-const AUTO_SUBPART_BLOCKS = ['funnel', 'tunnel', 'spout', 'mechanical_mixer', 'mechanical_pump', 'portable_storage_interface', 'mechanical_saw', 'mechanical_drill', 'deployer', 'mechanical_press', 'analog_lever', 'hand_crank', 'weighted_ejector', 'create:water_wheel', 'mechanical_roller'];
+const SUBPART_TOKENS = ['head', 'blade', 'pole', 'cog', 'cogwheel', 'pointer', 'flap', 'hand', 'fan', 'shaft', 'arm', 'middle', 'hose', 'top', 'belt', 'claw', 'body', 'wheel', 'roller', 'valve', 'handle', 'casing', 'guard'];
+const AUTO_SUBPART_BLOCKS = ['funnel', 'tunnel', 'spout', 'mechanical_mixer', 'mechanical_pump', 'portable_storage_interface', 'mechanical_saw', 'mechanical_drill', 'deployer', 'mechanical_press', 'analog_lever', 'hand_crank', 'weighted_ejector', 'create:water_wheel', 'mechanical_roller', 'chain_conveyor'];
 
 export interface LoadedAssets {
   blockDefinitions: Record<string, BlockDefinition>;
@@ -1080,7 +1080,11 @@ export class CreateModLoader {
 
     const modelJson = await this.fetchJson(url);
     if (modelJson) {
-      // SPECIAL HANDLING FOR OBJ MODELS (Crushing Wheels)
+      if (modelJson.parent) {
+        await this.loadModelRecursive(modelJson.parent);
+      }
+
+      // SPECIAL HANDLING FOR OBJ MODELS (Crushing Wheels, Water Wheels, Valve Handles)
       if (modelJson.loader && modelJson.loader.includes('obj')) {
         const objPathSrc = modelJson.model;
         let objPath = objPathSrc;
@@ -1089,19 +1093,22 @@ export class CreateModLoader {
         }
 
         // "create:block/crushing_wheel/crushing_wheel.obj"
-        // Sometimes path might handle "models/" prefix differently
         const relativeRef = objPath.replace(/^create:/, '');
-        // If it starts with "models/", avoid double prefix
         const cleanRelPath = relativeRef.startsWith('models/') ? relativeRef.substring(7) : relativeRef;
-
         const objUrl = `${this.assetsBase}/models/${cleanRelPath}`;
-
         const objText = await this.fetchText(objUrl);
+
         if (objText) {
           const parts = parseObj(objText);
 
-          // Fix material names for Crushing Wheels
-          // The OBJ file uses names like "crushing_wheel_plates" but the texture definition uses keys like "plates"
+          // Resolve all available textures (including from parents) to use for remapping
+          const collectTextures = (m: any): Record<string, string> => {
+            const acc = m.parent ? collectTextures(this.fetchedBlockModels.get(this.normalizePath(m.parent)) || {}) : {};
+            return { ...acc, ...(m.textures || {}) };
+          };
+          const availableTextures = collectTextures(modelJson);
+
+          // 1. CRUSHING WHEEL
           if (cleanPath.includes('crushing_wheel')) {
             const materialMap: Record<string, string> = {
               crushing_wheel_insert: 'insert',
@@ -1110,22 +1117,69 @@ export class CreateModLoader {
               m_axis_top: 'axis_top',
               m_spruce_log_top: 'spruce_log_top'
             };
-
             for (const part of parts) {
-              if (materialMap[part.texture]) {
-                part.texture = materialMap[part.texture];
-              }
+              if (materialMap[part.texture]) part.texture = materialMap[part.texture];
             }
           }
 
-          // Generic OBJ texture remap: if the material name does not match any declared texture key,
-          // try a few common aliases (strip m_/leading #) and fall back to texture key "0" when available.
-          const textureKeys = new Set(Object.keys(modelJson.textures ?? {}));
-          const defaultKey = textureKeys.has('0') ? '0' : undefined;
-          for (const part of parts) {
-            if (textureKeys.has(part.texture)) {
-              continue;
+          // 2. MECHANICAL ROLLER
+          if (cleanPath.includes('mechanical_roller')) {
+            const materialMap: Record<string, string> = {
+              roller_wheel: 'wheel'
+            };
+            for (const part of parts) {
+              if (materialMap[part.texture]) part.texture = materialMap[part.texture];
             }
+          }
+
+          // 3. CHAIN CONVEYOR
+          if (cleanPath.includes('chain_conveyor')) {
+             const materialMap: Record<string, string> = {
+               casing: 'conveyor_casing',
+               bullwheel: 'bullwheel',
+               axis: 'axis',
+               axis_top: 'axis_top'
+             };
+             for (const part of parts) {
+               if (materialMap[part.texture]) part.texture = materialMap[part.texture];
+             }
+          }
+
+          // 4. WATER WHEEL (and LARGE)
+          if (cleanPath.includes('water_wheel') || cleanPath.includes('large_water_wheel')) {
+            const materialMap: Record<string, string> = {
+              waterwheel_log: 'log', // or check availableTextures
+              waterwheel_plank: 'planks',
+              waterwheel_metal: 'metal',
+              waterwheel_stripped_log: 'log_top',
+              axis: 'axis',
+              axis_top: 'axis_top'
+            };
+            for (const part of parts) {
+              if (materialMap[part.texture]) part.texture = materialMap[part.texture];
+            }
+          }
+
+          // 4. VALVE HANDLE
+          if (cleanPath.includes('valve_handle')) {
+            const materialMap: Record<string, string> = {
+              Material: '3'
+            };
+             for (const part of parts) {
+              if (materialMap[part.texture]) part.texture = materialMap[part.texture];
+            }
+          }
+
+          // Generic OBJ texture remap
+          const textureKeys = new Set(Object.keys(availableTextures));
+          // If a texture key maps to another variable (#ref), we should resolve it? 
+          // Deepslate does this later, but for remapping "m_name" -> "name", we need to know "name" exists.
+
+          const defaultKey = textureKeys.has('0') ? '0' : undefined;
+          
+          for (const part of parts) {
+            if (textureKeys.has(part.texture)) continue;
+
             const stripped = part.texture.startsWith('m_') ? part.texture.slice(2) : part.texture;
             if (textureKeys.has(stripped)) {
               part.texture = stripped; continue;
@@ -1134,45 +1188,42 @@ export class CreateModLoader {
             if (textureKeys.has(noHash)) {
               part.texture = noHash; continue;
             }
+
+            // If we have mapped a material (e.g. 'log') but the texture key is actually '#log', handle that?
+            // Usually OBJ parts -> texture keys. Texture keys -> Paths.
+            // If part.texture is 'log', and keys has 'log', good.
+
             if (defaultKey) {
+              // Fallback to '0' if available (common for single-texture models)
+              // Only if we haven't found a match
               part.texture = defaultKey;
             }
           }
 
-          // Ensure declared textures are loaded into the atlas so custom meshes pick them up.
-          for (const tex of Object.values(modelJson.textures ?? {})) {
-            if (!tex || typeof tex !== 'string') {
-              continue;
-            }
-            if (tex.startsWith('#')) {
-              continue;
-            }
+          // Ensure declared textures are loaded
+          // use availableTextures to access all inherited textures too
+          for (const tex of Object.values(availableTextures)) {
+            if (!tex || typeof tex !== 'string') continue;
+            if (tex.startsWith('#')) continue;
             await this.loadTexture(tex);
           }
 
-          this.fetchedBlockModels.set(cleanPath, {
-            ...modelJson,
-            elements: parts,
-          });
-
-          // Ensure parent is loaded (often contains texture definitions)
-          if (modelJson.parent) {
-            await this.loadModelRecursive(modelJson.parent);
-          }
-          // Apply patches after parent load for OBJ-backed models as well
-          this.patchFunnelFlap(modelJson, cleanPath);
-          this.patchTunnelFlaps(modelJson, cleanPath);
+          modelJson.elements = parts;
         } else {
-          console.warn(`Failed to load OBJ: ${objUrl}`);
-          this.fetchedBlockModels.set(cleanPath, { elements: [] });
+             console.warn(`Failed to load OBJ: ${objUrl}`);
+             modelJson.elements = [];
         }
-        return;
+        // Fall through to standard processing (which handles parents, but we already loaded parent)
+        // We need to ensure we don't double-load parent or mess up
       }
 
-      // Ensure parents are available before mutating geometry so inheritance works.
-      // 1. Check parent
-      if (modelJson.parent) {
-        await this.loadModelRecursive(modelJson.parent);
+      // Standard processing continues...
+      // 1. Check parent (Already done above for context, but standard logic does it again? 
+      //    visitedModels check prevents double fetch, but we might want to avoid re-recursion overhead)
+      if (modelJson.parent && !modelJson.loader?.includes('obj')) {
+         // Only load if not already handled or if not OBJ (OBJ block did it)
+         // Actually, if we loaded it above, loadModelRecursive returns early.
+         await this.loadModelRecursive(modelJson.parent);
       }
 
       this.flattenCompositeChildren(modelJson);
