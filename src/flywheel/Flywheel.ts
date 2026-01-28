@@ -151,7 +151,7 @@ export class Flywheel implements InstancerProvider {
       instancer._model = model;
       this.instancers.set(key, (instancer as unknown) as InstancerImpl<Instance>);
     }
-    return instancer;
+    return instancer as unknown as Instancer<D>;
   }
 
   private getKey (type: InstanceType<Instance>, model: unknown): string {
@@ -185,10 +185,12 @@ export class Flywheel implements InstancerProvider {
       gl.vertexAttribPointer(loc2, 4, gl.FLOAT, false, stride, 32);
       gl.vertexAttribPointer(loc3, 4, gl.FLOAT, false, stride, 48);
 
-      this.ext.vertexAttribDivisorANGLE(loc0, 1);
-      this.ext.vertexAttribDivisorANGLE(loc1, 1);
-      this.ext.vertexAttribDivisorANGLE(loc2, 1);
-      this.ext.vertexAttribDivisorANGLE(loc3, 1);
+      if (this.ext) {
+        this.ext.vertexAttribDivisorANGLE(loc0, 1);
+        this.ext.vertexAttribDivisorANGLE(loc1, 1);
+        this.ext.vertexAttribDivisorANGLE(loc2, 1);
+        this.ext.vertexAttribDivisorANGLE(loc3, 1);
+      }
 
       return [loc0, loc1, loc2, loc3];
     };

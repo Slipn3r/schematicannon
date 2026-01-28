@@ -5,7 +5,7 @@ import type { PlacedBlock } from 'deepslate/core';
 import type { Resources } from 'deepslate';
 import { blockModelHasGeometry } from './deepslate_extensions';
 import { BlockColors } from 'deepslate/render';
-import type { Mesh } from 'deepslate/render';
+import type { Mesh, Cull } from 'deepslate/render';
 import type { ExtendedMesh, VariantLike } from '../types/assets';
 
 export type Axis = 'x' | 'y' | 'z';
@@ -89,7 +89,7 @@ export function buildRenderPlan (
       }
 
       const tint = getTint(id, props);
-      const mesh = blockModel.getMesh(resources, resources, tint);
+      const mesh = blockModel.getMesh(resources, {} as Cull, tint);
       if (!mesh) {
         continue;
       }

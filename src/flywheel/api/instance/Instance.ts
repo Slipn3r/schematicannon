@@ -4,6 +4,7 @@ export interface Instance {
   setPosition(pos: BlockPos): Instance;
   setChanged(): void;
   delete(): void;
+  write(buffer: Float32Array, offset: number): void;
 }
 
 export interface InstanceHandle {

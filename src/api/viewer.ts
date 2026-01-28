@@ -14,7 +14,7 @@ import { buildRenderPlan, type PlanBuilder } from './render_plan.js';
 export type Vec3 = [number, number, number];
 
 export type ViewerState = {
-  renderer: (StructureRenderer & { atlasTexture?: WebGLTexture }) | null;
+  renderer: StructureRenderer | null;
   flywheel: Flywheel | null;
   visuals: (RotatingVisual | StaticVisual)[];
   structure: Structure | null;
@@ -248,7 +248,7 @@ export function createStructureViewer (options: ViewerOptions) {
       });
 
       const renderPlan = planBuilder(structure.getBlocks(), resourcesBundle.resources, mesh => uploadMeshBuffers(gl, mesh));
-      const filteredStructure: Structure = {
+      const filteredStructure = {
         getSize: () => structure.getSize(),
         getBlocks: () => structure.getBlocks().filter(b => !renderPlan.flywheelBlocks.has(b.state.getName().toString())),
         getBlock: (pos: BlockPos) => {
@@ -258,14 +258,14 @@ export function createStructureViewer (options: ViewerOptions) {
           }
           return block;
         }
-      };
+      } as any as Structure;
 
-      state.renderer = new StructureRenderer(gl, filteredStructure, resourcesBundle.resources, { chunkSize: 8, useInvisibleBlockBuffer: false }) as StructureRenderer & { atlasTexture: WebGLTexture };
+      state.renderer = new StructureRenderer(gl, filteredStructure as any, resourcesBundle.resources, { chunkSize: 8, useInvisibleBlockBuffer: false });
       state.renderer.updateStructureBuffers();
 
       state.flywheel = new Flywheel(gl);
-      const atlasTexture = state.renderer.atlasTexture;
-      if (atlasTexture) {
+      const atlasTexture = (state.renderer as any).atlasTexture as WebGLTexture | undefined;
+      if (atlasTexture && state.flywheel) {
         state.flywheel.setTexture(atlasTexture);
       }
 

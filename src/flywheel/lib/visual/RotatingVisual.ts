@@ -14,7 +14,7 @@ export class RotatingVisual extends AbstractBlockEntityVisual implements Dynamic
   constructor (
     context: VisualizationContext,
     pos: BlockPos,
-    private model: unknown, // The mesh/model object
+    private _model: unknown, // The mesh/model object
     private axis: 'x' | 'y' | 'z' = 'y',
     speed = 0.5
   ) {
@@ -22,7 +22,7 @@ export class RotatingVisual extends AbstractBlockEntityVisual implements Dynamic
     this.speed = speed;
 
     this.instance = context.instancerProvider()
-      .instancer(InstanceTypes.TRANSFORMED, model)
+      .instancer(InstanceTypes.TRANSFORMED, this._model)
       .createInstance();
 
     this.instance.setPosition(pos);
@@ -53,13 +53,13 @@ export class RotatingVisual extends AbstractBlockEntityVisual implements Dynamic
     this.instance.translate(-0.5, -0.5, -0.5); // Un-center
   }
 
-  update (): void {
+  update (_partialTick: number): void {
     // Ticking update
     this.rotation += this.speed;
     this.rotation %= (Math.PI * 2);
   }
 
-  updateLight (): void {
+  updateLight (_partialTick: number): void {
     // TODO: Update light
   }
 

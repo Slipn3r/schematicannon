@@ -43,6 +43,7 @@ export type ReferenceFrame =
   | 'fixed';
 
 import type { Mesh } from 'deepslate/render';
+import { ModelMultiPartCondition } from 'src/api/deepslate_extensions.js';
 
 export interface ExtendedMesh extends Mesh {
   id?: string;
@@ -73,24 +74,13 @@ export interface RawBlockStateVariant {
   model: string;
   x?: number;
   y?: number;
+  z?: number;
   uvlock?: boolean;
   weight?: number;
 }
 
-export type RawMultipartWhenCondition = Record<string, string>;
-
-export interface RawMultipartWhenOR {
-  OR: RawMultipartWhenCondition[];
-}
-
-export interface RawMultipartWhenAND {
-  AND: RawMultipartWhenCondition[];
-}
-
-export type RawMultipartWhen = RawMultipartWhenCondition | RawMultipartWhenOR | RawMultipartWhenAND;
-
 export interface RawMultipartCase {
-  when?: RawMultipartWhen;
+  when?: ModelMultiPartCondition;
   apply: RawBlockStateVariant | RawBlockStateVariant[];
 }
 

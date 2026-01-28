@@ -1,5 +1,5 @@
 import { BlockDefinition, BlockModel, Identifier, type Resources } from 'deepslate';
-import { describeBlockDefinition, createBlockModelFromJson } from './deepslate_extensions';
+import { describeBlockDefinition, createBlockModelFromJson, ModelMultiPartCondition } from './deepslate_extensions';
 import { mergeAtlases } from './atlas_merger.js';
 import type { Structure, TextureAtlas } from 'deepslate';
 import { CreateModLoader, type CreateModLoaderOptions, type LoadedAssets } from './create_loader.js';
@@ -43,7 +43,7 @@ const fetchJsonLocalFirst = async (fetchFn: FetchFn, localPath: string, remoteUr
   return await remote.json();
 };
 
-const fetchImageLocalFirst = (fetchFn: FetchFn, localPath: string, remoteUrl: string) => new Promise<HTMLImageElement>((res, rej) => {
+const fetchImageLocalFirst = (_fetchFn: FetchFn, localPath: string, remoteUrl: string) => new Promise<HTMLImageElement>((res, rej) => {
   const load = (src: string, fallback?: string) => {
     const image = new Image();
     image.onload = () => res(image);
@@ -81,7 +81,7 @@ export interface ResourceBundle {
   blockDefinitions: Record<string, BlockDefinition>;
   blockModels: Record<string, BlockModel>;
   textureAtlas: TextureAtlas;
-  autoSubparts: Array<{ blockId: string; baseModel: string; subpart: string; when?: Record<string, string> }>;
+  autoSubparts: Array<{ blockId: string; baseModel: string; subpart: string; when?: ModelMultiPartCondition }>;
   loader: CreateModLoader;
 }
 
@@ -115,7 +115,7 @@ export async function loadResourcesForStructure (structure: Structure, options: 
     blockDefinitions['minecraft:' + id] = BlockDefinition.fromJson(vanilla.blockStates[id]);
   });
   Object.keys(modAssets.blockDefinitions).forEach(id => {
-    blockDefinitions[id] = modAssets.blockDefinitions[id];
+    blockDefinitions[id] = modAssets.blockDefinitions[id]!;
   });
 
   const blockProperties: Record<string, Record<string, string[]>> = {};
@@ -156,7 +156,7 @@ export async function loadResourcesForStructure (structure: Structure, options: 
     return String(value);
   };
 
-  const collectFromWhen = (when: RawMultipartWhen | undefined, bucket: Map<string, Set<string>>) => {
+  const collectFromWhen = (when: ModelMultiPartCondition | undefined, bucket: Map<string, Set<string>>) => {
     if (!when) {
       return;
     }
@@ -188,8 +188,8 @@ export async function loadResourcesForStructure (structure: Structure, options: 
           defaultProps = parsed;
         }
       }
-      if (Object.keys(defaultProps).length === 0) {
-        defaultProps = parseVariantKey(keys[0]);
+      if (Object.keys(defaultProps).length === 0 && keys.length > 0) {
+        defaultProps = parseVariantKey(keys[0]!);
       }
     }
 
@@ -201,8 +201,13 @@ export async function loadResourcesForStructure (structure: Structure, options: 
           collectFromWhen(first, properties);
           defaultProps = {};
           Object.entries(first as Record<string, string>).forEach(([k, v]) => {
+            if (k === 'OR' || k === 'AND') {
+              return;
+            }
             const option = normalizeWhenValue(v).split('|')[0];
-            defaultProps[k] = option;
+            if (option) {
+              defaultProps[k] = option;
+            }
           });
         }
       }
@@ -217,7 +222,10 @@ export async function loadResourcesForStructure (structure: Structure, options: 
       if (defaultProps[k] !== undefined) {
         return;
       }
-      defaultProps[k] = v[0];
+      const v0 = v[0];
+      if (v0) {
+        defaultProps[k] = v0;
+      }
     });
 
     return { properties: propertyObj, defaults: defaultProps };
@@ -236,13 +244,16 @@ export async function loadResourcesForStructure (structure: Structure, options: 
   const blockModels: Record<string, BlockModel> = {};
   Object.keys(vanilla.blockModels).forEach(id => {
     const modelId = Identifier.parse('minecraft:' + id);
-    blockModels[modelId.toString()] = createBlockModelFromJson(vanilla.blockModels[id]);
+    const model = vanilla.blockModels[id];
+    if (model) {
+      blockModels[modelId.toString()] = createBlockModelFromJson(model);
+    }
   });
   Object.keys(modAssets.blockModels).forEach(id => {
-    blockModels[id] = modAssets.blockModels[id];
+    blockModels[id] = modAssets.blockModels[id]!;
   });
 
-  Object.values(blockModels).forEach(m => m.flatten({ getBlockModel: id => blockModels[id.toString()] }));
+  Object.values(blockModels).forEach(m => m.flatten({ getBlockModel: id => blockModels[id.toString()] ?? null }));
 
   const warnedDefinitions = new Set<string>();
   const warnedModels = new Set<string>();

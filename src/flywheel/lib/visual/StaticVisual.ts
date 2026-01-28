@@ -23,15 +23,15 @@ export class StaticVisual extends AbstractBlockEntityVisual {
     this.instance.translate(pos[0], pos[1], pos[2]);
   }
 
-  update (): void {
+  update (_partialTick: number): void {
     // No-op
   }
 
-  beginFrame (): void {
+  beginFrame (_context: unknown): void {
     // No-op for static visuals
   }
 
-  updateLight (): void {
+  updateLight (_partialTick: number): void {
     // TODO: Update light
   }
 

@@ -1,7 +1,7 @@
-import { BlockDefinition, BlockModel } from 'deepslate';
-import { createBlockModelFromJson } from './deepslate_extensions';
-import { parseObj } from './obj_loader.js';
-import { RawBlockModel, RawBlockState, RawModelElement, RawMultipartWhen, RawBlockStateVariant, RawMultipartCase } from '../types/assets.js';
+import { BlockDefinition, BlockModel, Direction } from 'deepslate';
+import { createBlockModelFromJson, ModelMultiPartCondition } from './deepslate_extensions';
+import { parseObj, ObjMeshPart } from './obj_loader.js';
+import { RawBlockModel, RawBlockState, RawModelElement, RawBlockStateVariant, RawMultipartCase, RawModelFace } from '../types/assets.js';
 
 const DEFAULT_ASSETS_BASE = './assets/create';
 const SUBPART_TOKENS = ['head', 'blade', 'pole', 'cog', 'cogwheel', 'pointer', 'flap', 'hand', 'fan', 'shaft', 'arm', 'middle', 'hose', 'top', 'belt', 'claw', 'body', 'wheel', 'roller', 'valve', 'handle', 'casing', 'guard'];
@@ -24,7 +24,7 @@ export class CreateModLoader {
   private readonly fetchedBlockModels = new Map<string, RawBlockModel>();
   private readonly fetchedTextures = new Map<string, Blob>();
   private readonly enableAutoSubparts: boolean;
-  private readonly autoSubpartLog: Array<{ blockId: string; baseModel: string; subpart: string; when: Record<string, string> | undefined }> = [];
+  private readonly autoSubpartLog: Array<{ blockId: string; baseModel: string; subpart: string; when: ModelMultiPartCondition | undefined }> = [];
   private readonly assetsBase: string;
   private readonly modelManifest: Set<string>;
 
@@ -183,7 +183,7 @@ export class CreateModLoader {
 
   private getSubpartCandidates (baseModel: string): string[] {
     const candidates: string[] = [];
-    const [ns, path] = baseModel.includes(':') ? baseModel.split(':', 2) : ['create', baseModel];
+    const [ns, path] = (baseModel.includes(':') ? baseModel.split(':', 2) : ['create', baseModel]) as [string, string];
     const parts = path.split('/');
     const dirs = new Set<string>();
 
@@ -249,19 +249,22 @@ export class CreateModLoader {
     };
 
     const referenced = new Set<string>();
-    const modelUsage = new Map<string, { apply: RawBlockStateVariant; when: Record<string, string> | undefined }[]>();
+    const modelUsage = new Map<string, { apply: RawBlockStateVariant; when: ModelMultiPartCondition | undefined }[]>();
     const multiparts: RawMultipartCase[] = [];
 
-    const recordUsage = (model: string, when: Record<string, string> | undefined, apply: RawBlockStateVariant) => {
+    const recordUsage = (model: string, when: ModelMultiPartCondition | undefined, apply: RawBlockStateVariant) => {
       const norm = this.normalizePath(model);
       referenced.add(norm);
       if (!modelUsage.has(norm)) {
         modelUsage.set(norm, []);
       }
-      modelUsage.get(norm)!.push({ apply: apply ? JSON.parse(JSON.stringify(apply)) : undefined, when: when ? JSON.parse(JSON.stringify(when)) : undefined });
+      modelUsage.get(norm)!.push({
+        apply: apply ? JSON.parse(JSON.stringify(apply)) as RawBlockStateVariant : undefined!,
+        when: when ? JSON.parse(JSON.stringify(when)) as ModelMultiPartCondition : undefined
+      });
     };
 
-    const pushMultipart = (apply: RawBlockStateVariant, when: RawMultipartWhen | undefined) => {
+    const pushMultipart = (apply: RawBlockStateVariant, when: ModelMultiPartCondition | undefined) => {
       multiparts.push({ apply, when });
       if (apply?.model) {
         recordUsage(apply.model, when, apply);
@@ -324,7 +327,7 @@ export class CreateModLoader {
           }
           // Pump cog orientation should align its axis to the pump facing (horizontal pumps need vertical cogs).
           if (blockId.includes('mechanical_pump') && candidate.includes('mechanical_pump/cog')) {
-            const facing = when?.facing;
+            const facing = (when && !('OR' in when)) ? when.facing : undefined;
             const norm = (v: number) => ((v % 360) + 360) % 360;
             switch (facing) {
               case 'north':
@@ -359,7 +362,7 @@ export class CreateModLoader {
           }
           // Drill head should align to facing rather than inheriting casing x/y which aim the body.
           if (blockId.includes('mechanical_drill') && candidate.includes('mechanical_drill/head')) {
-            const facing = when?.facing;
+            const facing = (when && !('OR' in when)) ? when.facing : undefined;
             const norm = (v: number) => ((v % 360) + 360) % 360;
             switch (facing) {
               case 'north':
@@ -428,23 +431,26 @@ export class CreateModLoader {
         return;
       }
       for (const part of baseMultiparts) {
-        const apply = part.apply;
+        const applies = Array.isArray(part.apply) ? part.apply : [part.apply];
         const when = part.when;
-        const modelName = apply?.model as string | undefined;
-        if (!modelName || !sourceModelMatch(modelName)) {
-          continue;
+
+        for (const apply of applies) {
+          const modelName = apply?.model;
+          if (!modelName || !sourceModelMatch(modelName)) {
+            continue;
+          }
+          const facing = (when && 'facing' in when) ? when.facing : undefined;
+          if (facing === 'up' || facing === 'down') {
+            continue;
+          }
+          const keyed = `${normFlap}|${JSON.stringify(when ?? {})}|${apply?.x ?? 0}|${apply?.y ?? 0}`;
+          if (referenced.has(keyed)) {
+            continue;
+          }
+          multiparts.push({ apply: { model: normFlap, x: apply?.x, y: apply?.y }, when });
+          referenced.add(keyed);
+          this.autoSubpartLog.push({ blockId, baseModel: primaryBaseModel, subpart: normFlap, when: when ? { ...when } : undefined });
         }
-        const facing = (when && 'facing' in when) ? (when as RawMultipartWhenCondition).facing : undefined;
-        if (facing === 'up' || facing === 'down') {
-          continue;
-        }
-        const keyed = `${normFlap}|${JSON.stringify(when ?? {})}|${apply?.x ?? 0}|${apply?.y ?? 0}`;
-        if (referenced.has(keyed)) {
-          continue;
-        }
-        multiparts.push({ apply: { model: normFlap, x: apply?.x, y: apply?.y }, when });
-        referenced.add(keyed);
-        this.autoSubpartLog.push({ blockId, baseModel: primaryBaseModel, subpart: normFlap, when: when ? { ...when } : undefined });
       }
     };
 
@@ -488,10 +494,15 @@ export class CreateModLoader {
       const props: Record<string, string> = {};
       key.split(',').forEach(p => {
         const [k, v] = p.split('=');
-        props[k] = v;
+        if (k && v) {
+          props[k] = v;
+        }
       });
 
       const original = Array.isArray(def.variants[key]) ? def.variants[key][0] : def.variants[key];
+      if (!original) {
+        continue;
+      }
       const models: string[] = [];
 
       // 1. Determine base models
@@ -621,7 +632,7 @@ export class CreateModLoader {
     def.multipart.push({ apply: { model: 'create:block/fluid_pipe/core_z' }, when: { OR: [{}] } });
 
     // 2. Add Connections based on heuristic mapping
-    const connections = [
+    const connections: { when: ModelMultiPartCondition; model: string }[] = [
       { when: { up: 'true' }, model: 'create:block/fluid_pipe/u_x' },
       { when: { down: 'true' }, model: 'create:block/fluid_pipe/d_x' },
       { when: { south: 'true' }, model: 'create:block/fluid_pipe/l_x' },
@@ -638,52 +649,12 @@ export class CreateModLoader {
     }
   }
 
-  private mergeModelJson (targetId: string, sourceRef: string) {
-    let sourceId = sourceRef;
-    let transform = '';
-    if (sourceRef.includes('#')) {
-      [sourceId, transform] = sourceRef.split('#');
-    }
-
-    this.ensureElementsOnTarget(targetId);
-
-    const target = this.fetchedBlockModels.get(targetId);
-    const source = this.fetchedBlockModels.get(sourceId);
-
-    if (!target || !source) {
-      return;
-    }
-
-    let sourceElements = source.elements;
-    if (transform === 'rotate_x_90' && sourceElements) {
-      sourceElements = sourceElements.map(el => ('from' in el) ? this.rotateElementX90(el as RawModelElement) : el);
-    } else if (transform === 'rotate_x_270' && sourceElements) {
-      sourceElements = sourceElements.map(el => ('from' in el) ? this.rotateElementX270(el as RawModelElement) : el);
-    }
-
-    // Merge elements
-    if (sourceElements) {
-      if (!target.elements) {
-        target.elements = [];
-      }
-      target.elements.push(...sourceElements);
-    }
-
-    // Merge textures
-    if (source.textures) {
-      if (!target.textures) {
-        target.textures = {};
-      }
-      Object.assign(target.textures, source.textures);
-    }
-  }
-
   private rotateElementX90 (element: RawModelElement): RawModelElement {
-    const newEl = JSON.parse(JSON.stringify(element));
+    const newEl = JSON.parse(JSON.stringify(element)) as RawModelElement;
     // Rotate around center (8, 8, 8) by 90 deg on X
     // y' = - (z - 8) + 8 = 16 - z
     // z' = (y - 8) + 8 = y
-    const rot = (p: number[]) => [p[0], 16 - p[2], p[1]];
+    const rot = (p: [number, number, number]): [number, number, number] => [p[0], 16 - p[2], p[1]];
 
     const from = rot(element.from);
     const to = rot(element.to);
@@ -700,7 +671,7 @@ export class CreateModLoader {
     ];
 
     if (newEl.rotation) {
-      newEl.rotation.origin = rot(newEl.rotation.origin);
+      newEl.rotation.origin = rot(newEl.rotation.origin as [number, number, number]);
       if (newEl.rotation.axis === 'y') {
         newEl.rotation.axis = 'z';
       } else if (newEl.rotation.axis === 'z') {
@@ -729,57 +700,6 @@ export class CreateModLoader {
     return newEl;
   }
 
-  private rotateElementX270 (element: RawModelElement): RawModelElement {
-    const newEl = JSON.parse(JSON.stringify(element));
-    // Rotate around center (8, 8, 8) by 270 deg on X (or -90)
-    // y' = (z - 8) + 8 = z
-    // z' = -(y - 8) + 8 = 16 - y
-    const rot = (p: number[]) => [p[0], p[2], 16 - p[1]];
-
-    const from = rot(element.from);
-    const to = rot(element.to);
-
-    newEl.from = [
-      Math.min(from[0], to[0]),
-      Math.min(from[1], to[1]),
-      Math.min(from[2], to[2])
-    ];
-    newEl.to = [
-      Math.max(from[0], to[0]),
-      Math.max(from[1], to[1]),
-      Math.max(from[2], to[2])
-    ];
-
-    if (newEl.rotation) {
-      newEl.rotation.origin = rot(newEl.rotation.origin);
-      if (newEl.rotation.axis === 'y') {
-        newEl.rotation.axis = 'z';
-        newEl.rotation.angle = -newEl.rotation.angle;
-      } else if (newEl.rotation.axis === 'z') {
-        newEl.rotation.axis = 'y';
-      }
-    }
-
-    const faceMap: Record<string, string> = {
-      up: 'north',
-      down: 'south',
-      north: 'down',
-      south: 'up',
-      east: 'east',
-      west: 'west'
-    };
-
-    if (newEl.faces) {
-      const newFaces: Record<string, RawModelFace> = {};
-      for (const [dir, face] of Object.entries(newEl.faces)) {
-        const newDir = faceMap[dir] || dir;
-        newFaces[newDir] = face as RawModelFace;
-      }
-      newEl.faces = newFaces;
-    }
-    return newEl;
-  }
-
   private patchFluidPipeConnectionRules (def: RawBlockState) {
     if (!def.multipart) {
       def.multipart = [];
@@ -791,7 +711,7 @@ export class CreateModLoader {
     // We rely on Z-fighting (invisible for identical overlaps) to handle cases where strict rules ALSO match.
 
     // Map global direction to a model that we know has that limb (based on our procedural patch)
-    const fallbackRules = [
+    const fallbackRules: { when: ModelMultiPartCondition; model: string }[] = [
       { when: { up: 'true' }, model: 'create:block/fluid_pipe/u_x' }, // u_x has usage where u->up
       { when: { down: 'true' }, model: 'create:block/fluid_pipe/d_x' }, // d_x has usage where d->down
       { when: { north: 'true' }, model: 'create:block/fluid_pipe/r_x' }, // r_x has usage where r->north
@@ -829,10 +749,11 @@ export class CreateModLoader {
       }
 
       for (const face of faces) {
-        if (!core.faces[face]) {
-          core.faces[face] = {
+        const dir = face as Direction;
+        if (!core.faces[dir]) {
+          core.faces[dir] = {
             texture: defaultTexture,
-            uv: defaultUv
+            uv: defaultUv as [number, number, number, number]
           };
         }
       }
@@ -848,8 +769,8 @@ export class CreateModLoader {
       return;
     } // e.g. "core_x", "window", etc.
 
-    const components = parts[0];
-    const axis = parts[1]; // "x", "y", "z"
+    const components = parts[0]!;
+    const axis = parts[1]!; // "x", "y", "z"
 
     // Ignore non-connection models
     if (!['x', 'y', 'z'].includes(axis)) {
@@ -913,6 +834,9 @@ export class CreateModLoader {
     // Iterate letters (e.g. "l", "u")
     for (const char of components) {
       const dir = getDir(char, axis);
+      if (!dir) {
+        continue;
+      }
       if (dir) {
         this.addPipeLimb(json, dir);
       }
@@ -999,26 +923,10 @@ export class CreateModLoader {
       };
     }
 
+    if (!json.elements) {
+      json.elements = [];
+    }
     json.elements.push(lim);
-  }
-
-  private ensureElementsOnTarget (targetId: string) {
-    const target = this.fetchedBlockModels.get(targetId);
-    if (!target || target.elements) {
-      return;
-    }
-
-    if (target.parent) {
-      const parentId = this.normalizePath(target.parent);
-      // Assuming parent is already loaded because we loaded recursively
-      this.ensureElementsOnTarget(parentId);
-
-      const parent = this.fetchedBlockModels.get(parentId);
-      if (parent && parent.elements) {
-        // Deep recursive clone to avoid reference issues
-        target.elements = JSON.parse(JSON.stringify(parent.elements));
-      }
-    }
   }
 
   private flattenCompositeChildren (modelJson: RawBlockModel) {
@@ -1133,152 +1041,158 @@ export class CreateModLoader {
       if (modelJson.loader && modelJson.loader.includes('obj')) {
         const objPathSrc = modelJson.model;
         let objPath = objPathSrc;
-        if (!objPath.endsWith('.obj')) {
-          objPath += '.obj';
-        }
-
-        // "create:block/crushing_wheel/crushing_wheel.obj"
-        const relativeRef = objPath.replace(/^create:/, '');
-        const cleanRelPath = relativeRef.startsWith('models/') ? relativeRef.substring(7) : relativeRef;
-        const objUrl = `${this.assetsBase}/models/${cleanRelPath}`;
-        const objText = await this.fetchText(objUrl);
-
-        if (objText) {
-          const parts = parseObj(objText);
-
-          // Resolve all available textures (including from parents) to use for remapping
-          const collectTextures = (m: RawBlockModel): Record<string, string> => {
-            const acc = m.parent ? collectTextures(this.fetchedBlockModels.get(this.normalizePath(m.parent)) || {}) : {};
-            return { ...acc, ...(m.textures || {}) };
-          };
-          const availableTextures = collectTextures(modelJson);
-
-          // 1. CRUSHING WHEEL
-          if (cleanPath.includes('crushing_wheel')) {
-            const materialMap: Record<string, string> = {
-              crushing_wheel_insert: 'insert',
-              crushing_wheel_plates: 'plates',
-              m_axis: 'axis',
-              m_axis_top: 'axis_top',
-              m_spruce_log_top: 'spruce_log_top'
-            };
-            for (const part of parts) {
-              if (materialMap[part.texture]) {
-                part.texture = materialMap[part.texture];
-              }
-            }
+        if (objPath) {
+          if (!objPath.endsWith('.obj')) {
+            objPath += '.obj';
           }
 
-          // 2. MECHANICAL ROLLER
-          if (cleanPath.includes('mechanical_roller')) {
-            const materialMap: Record<string, string> = {
-              roller_wheel: 'wheel'
+          // "create:block/crushing_wheel/crushing_wheel.obj"
+          const relativeRef = objPath.replace(/^create:/, '');
+          const cleanRelPath = relativeRef.startsWith('models/') ? relativeRef.substring(7) : relativeRef;
+          const objUrl = `${this.assetsBase}/models/${cleanRelPath}`;
+          const objText = await this.fetchText(objUrl);
+
+          if (objText) {
+            const parts = parseObj(objText);
+            // ... (I need the rest of the block)
+
+            // Resolve all available textures (including from parents) to use for remapping
+            const collectTextures = (m: RawBlockModel): Record<string, string> => {
+              const acc = m.parent ? collectTextures(this.fetchedBlockModels.get(this.normalizePath(m.parent)) || {}) : {};
+              return { ...acc, ...(m.textures || {}) };
             };
-            for (const part of parts) {
-              if (materialMap[part.texture]) {
-                part.texture = materialMap[part.texture];
+            const availableTextures = collectTextures(modelJson);
+
+            // 1. CRUSHING WHEEL
+            if (cleanPath.includes('crushing_wheel')) {
+              const materialMap: Record<string, string> = {
+                crushing_wheel_insert: 'insert',
+                crushing_wheel_plates: 'plates',
+                m_axis: 'axis',
+                m_axis_top: 'axis_top',
+                m_spruce_log_top: 'spruce_log_top'
+              };
+              for (const part of parts) {
+                const mapped = materialMap[part.texture];
+                if (mapped) {
+                  part.texture = mapped;
+                }
               }
             }
-          }
 
-          // 3. CHAIN CONVEYOR
-          if (cleanPath.includes('chain_conveyor')) {
-            const materialMap: Record<string, string> = {
-              casing: 'conveyor_casing',
-              bullwheel: 'bullwheel',
-              axis: 'axis',
-              axis_top: 'axis_top',
-              port: 'conveyor_port'
-            };
-            for (const part of parts) {
-              if (materialMap[part.texture]) {
-                part.texture = materialMap[part.texture];
+            // 2. MECHANICAL ROLLER
+            if (cleanPath.includes('mechanical_roller')) {
+              const materialMap: Record<string, string> = {
+                roller_wheel: 'wheel'
+              };
+              for (const part of parts) {
+                const mapped = materialMap[part.texture];
+                if (mapped) {
+                  part.texture = mapped;
+                }
               }
             }
-          }
 
-          // 4. WATER WHEEL (and LARGE)
-          if (cleanPath.includes('water_wheel') || cleanPath.includes('large_water_wheel')) {
-            const materialMap: Record<string, string> = {
-              waterwheel_log: 'log', // or check availableTextures
-              waterwheel_plank: 'planks',
-              waterwheel_metal: 'metal',
-              waterwheel_stripped_log: 'log_top',
-              axis: 'axis',
-              axis_top: 'axis_top'
-            };
-            for (const part of parts) {
-              if (materialMap[part.texture]) {
-                part.texture = materialMap[part.texture];
+            // 3. CHAIN CONVEYOR
+            if (cleanPath.includes('chain_conveyor')) {
+              const materialMap: Record<string, string> = {
+                casing: 'conveyor_casing',
+                bullwheel: 'bullwheel',
+                axis: 'axis',
+                axis_top: 'axis_top',
+                port: 'conveyor_port'
+              };
+              for (const part of parts) {
+                const mapped = materialMap[part.texture];
+                if (mapped) {
+                  part.texture = mapped;
+                }
               }
             }
-          }
 
-          // 4. VALVE HANDLE
-          if (cleanPath.includes('valve_handle')) {
-            const materialMap: Record<string, string> = {
-              Material: '3'
-            };
-            for (const part of parts) {
-              if (materialMap[part.texture]) {
-                part.texture = materialMap[part.texture];
+            // 4. WATER WHEEL (and LARGE)
+            if (cleanPath.includes('water_wheel') || cleanPath.includes('large_water_wheel')) {
+              const materialMap: Record<string, string> = {
+                waterwheel_log: 'log', // or check availableTextures
+                waterwheel_plank: 'planks',
+                waterwheel_metal: 'metal',
+                waterwheel_stripped_log: 'log_top',
+                axis: 'axis',
+                axis_top: 'axis_top'
+              };
+              for (const part of parts) {
+                const mapped = materialMap[part.texture];
+                if (mapped) {
+                  part.texture = mapped;
+                }
               }
             }
-          }
 
-          // Generic OBJ texture remap
-          const textureKeys = new Set(Object.keys(availableTextures));
-          // If a texture key maps to another variable (#ref), we should resolve it?
-          // Deepslate does this later, but for remapping "m_name" -> "name", we need to know "name" exists.
-
-          const defaultKey = textureKeys.has('0') ? '0' : undefined;
-
-          for (const part of parts) {
-            if (textureKeys.has(part.texture)) {
-              continue;
+            // 4. VALVE HANDLE
+            if (cleanPath.includes('valve_handle')) {
+              const materialMap: Record<string, string> = {
+                Material: '3'
+              };
+              for (const part of parts) {
+                const mapped = materialMap[part.texture];
+                if (mapped) {
+                  part.texture = mapped;
+                }
+              }
             }
 
-            const stripped = part.texture.startsWith('m_') ? part.texture.slice(2) : part.texture;
-            if (textureKeys.has(stripped)) {
-              part.texture = stripped;
-              continue;
-            }
-            const noHash = stripped.startsWith('#') ? stripped.slice(1) : stripped;
-            if (textureKeys.has(noHash)) {
-              part.texture = noHash;
-              continue;
-            }
+            // Generic OBJ texture remap
+            const textureKeys = new Set(Object.keys(availableTextures));
+            // If a texture key maps to another variable (#ref), we should resolve it?
+            // Deepslate does this later, but for remapping "m_name" -> "name", we need to know "name" exists.
 
-            // If we have mapped a material (e.g. 'log') but the texture key is actually '#log', handle that?
-            // Usually OBJ parts -> texture keys. Texture keys -> Paths.
-            // If part.texture is 'log', and keys has 'log', good.
+            const defaultKey = textureKeys.has('0') ? '0' : undefined;
 
-            if (defaultKey) {
+            for (const part of parts) {
+              if (textureKeys.has(part.texture)) {
+                continue;
+              }
+
+              const stripped = part.texture.startsWith('m_') ? part.texture.slice(2) : part.texture;
+              if (textureKeys.has(stripped)) {
+                part.texture = stripped;
+                continue;
+              }
+              const noHash = stripped.startsWith('#') ? stripped.slice(1) : stripped;
+              if (textureKeys.has(noHash)) {
+                part.texture = noHash;
+                continue;
+              }
+
+              // If we have mapped a material (e.g. 'log') but the texture key is actually '#log', handle that?
+              // Usually OBJ parts -> texture keys. Texture keys -> Paths.
+              // If part.texture is 'log', and keys has 'log', good.
+
+              if (defaultKey) {
               // Fallback to '0' if available (common for single-texture models)
               // Only if we haven't found a match
-              part.texture = defaultKey;
+                part.texture = defaultKey;
+              }
             }
-          }
 
-          // Ensure declared textures are loaded
-          // use availableTextures to access all inherited textures too
-          for (const tex of Object.values(availableTextures)) {
-            if (!tex || typeof tex !== 'string') {
-              continue;
+            // Ensure declared textures are loaded
+            // use availableTextures to access all inherited textures too
+            for (const tex of Object.values(availableTextures)) {
+              if (!tex || typeof tex !== 'string') {
+                continue;
+              }
+              if (tex.startsWith('#')) {
+                continue;
+              }
+              await this.loadTexture(tex);
             }
-            if (tex.startsWith('#')) {
-              continue;
-            }
-            await this.loadTexture(tex);
-          }
 
-          modelJson.elements = parts;
-        } else {
-          console.warn(`Failed to load OBJ: ${objUrl}`);
-          modelJson.elements = [];
+            modelJson.elements = parts;
+          } else {
+            console.warn(`Failed to load OBJ: ${objUrl}`);
+            modelJson.elements = [];
+          }
         }
-        // Fall through to standard processing (which handles parents, but we already loaded parent)
-        // We need to ensure we don't double-load parent or mess up
       }
 
       // Standard processing continues...
@@ -1305,11 +1219,13 @@ export class CreateModLoader {
       if (modelJson.textures) {
         for (const key in modelJson.textures) {
           const texturePath = modelJson.textures[key];
-          if (texturePath.startsWith('#')) {
-            continue;
-          } // Reference to another variable
+          if (texturePath) {
+            if (texturePath.startsWith('#')) {
+              continue;
+            } // Reference to another variable
 
-          await this.loadTexture(texturePath);
+            await this.loadTexture(texturePath);
+          }
         }
       }
     } else {
@@ -1334,7 +1250,7 @@ export class CreateModLoader {
       if (cleanPath.includes('smart_')) {
         const fallbackPath = cleanPath.replace('smart_', '');
         const fallbackUrl = `${this.assetsBase}/models/${fallbackPath.replace('create:', '')}.json`;
-        const fallbackJson = await this.fetchJson(fallbackUrl);
+        const fallbackJson = await this.fetchJson<RawBlockModel>(fallbackUrl);
         if (fallbackJson) {
           console.warn(`[CreateModLoader] Missing ${cleanPath}, using fallback ${fallbackPath}`);
           this.flattenCompositeChildren(fallbackJson);
@@ -1345,10 +1261,9 @@ export class CreateModLoader {
           if (fallbackJson.textures) {
             for (const key in fallbackJson.textures) {
               const texturePath = fallbackJson.textures[key];
-              if (texturePath.startsWith('#')) {
-                continue;
+              if (texturePath && !texturePath.startsWith('#')) {
+                await this.loadTexture(texturePath);
               }
-              await this.loadTexture(texturePath);
             }
           }
           return;
@@ -1365,6 +1280,9 @@ export class CreateModLoader {
     if (cleanPath === 'create:block/mechanical_arm/block') {
       await this.loadModelRecursive('create:block/mechanical_arm/item');
       const itemModel = this.fetchedBlockModels.get('create:block/mechanical_arm/item');
+      if (!itemModel) {
+        return;
+      }
       const { bodyElements, cogElements, textures } = this.splitMechanicalArmElements(itemModel);
       if (bodyElements.length) {
         modelJson.elements = this.translateElements(bodyElements, 0, 16, 0);
@@ -1465,21 +1383,21 @@ export class CreateModLoader {
       textures._flap = textures._flap ?? 'create:block/funnel/funnel_back';
       texKey = '#_flap';
     }
-    const makeFlap = (from: number[], to: number[], rotateDown: number, rotateUp: number) => ({
+    const makeFlap = (from: [number, number, number], to: [number, number, number], rotateDown: number, rotateUp: number) => ({
       name: 'Flap',
       from,
       to,
-      rotation: { angle: 0, axis: 'y', origin: [8, 8, 8] },
+      rotation: { angle: 0, axis: 'y' as const, origin: [8, 8, 8] as [number, number, number] },
       faces: {
-        north: { uv: [6, 8, 6.5, 14.5], texture: texKey },
-        east: { uv: [6, 8, 7.5, 14.5], rotation: 180, texture: texKey },
-        south: { uv: [7, 8, 7.5, 14.5], texture: texKey },
-        west: { uv: [6, 8, 7.5, 14.5], texture: texKey },
-        up: { uv: [6, 8.5, 7.5, 8], rotation: rotateUp, texture: texKey },
-        down: { uv: [6, 14, 7.5, 14.5], rotation: rotateDown, texture: texKey }
+        north: { uv: [6, 8, 6.5, 14.5] as [number, number, number, number], texture: texKey },
+        east: { uv: [6, 8, 7.5, 14.5] as [number, number, number, number], rotation: 180 as const, texture: texKey },
+        south: { uv: [7, 8, 7.5, 14.5] as [number, number, number, number], texture: texKey },
+        west: { uv: [6, 8, 7.5, 14.5] as [number, number, number, number], texture: texKey },
+        up: { uv: [6, 8.5, 7.5, 8] as [number, number, number, number], rotation: rotateUp as 0 | 90 | 180 | 270, texture: texKey },
+        down: { uv: [6, 14, 7.5, 14.5] as [number, number, number, number], rotation: rotateDown as 0 | 90 | 180 | 270, texture: texKey }
       }
-    });
-    const segments = [
+    }) as RawModelElement;
+    const segments: [number, number][] = [
       [2, 5],
       [5, 8],
       [8, 11],
@@ -1506,7 +1424,8 @@ export class CreateModLoader {
       return;
     }
 
-    for (const part of model.elements) {
+    // needs refinement, disabled for now
+    /*  for (const part of model.elements) {
       if ('mesh' in part && part.mesh && part.mesh.quads) {
         const visited = new Set<unknown>();
         for (const quad of part.mesh.quads) {
@@ -1530,13 +1449,13 @@ export class CreateModLoader {
               n.z = -nx;
             }
           };
-          processVertex(quad.p0);
-          processVertex(quad.p1);
-          processVertex(quad.p2);
-          processVertex(quad.p3);
+          processVertex(quad.v1);
+          processVertex(quad.v2);
+          processVertex(quad.v3);
+          processVertex(quad.v4);
         }
       }
-    }
+    } */
   }
 
   private translateElements (elements: RawModelElement[], dx: number, dy: number, dz: number) {
@@ -1564,7 +1483,7 @@ export class CreateModLoader {
     const clone = (el: RawModelElement) => JSON.parse(JSON.stringify(el)) as RawModelElement;
     const cogElements = elements.filter(isCog).map(clone);
     const bodyElements = elements.filter(isBody).map(clone);
-    return { bodyElements, cogElements, textures: itemModel?.textures ?? {} };
+    return { bodyElements, cogElements, textures: (itemModel?.textures ?? {}) as Record<string, string> };
   }
 
   private async injectMechanicalCrafterGears (def: RawBlockState & { _gearsInjected?: boolean }) {
@@ -1622,9 +1541,9 @@ export class CreateModLoader {
       if (!part.apply) {
         continue;
       }
-      const gearModel = pickGearModel(part.when);
+      const gearModel = pickGearModel();
       const apply = Array.isArray(part.apply) ? part.apply[0] : part.apply;
-      const facing = (part.when && 'facing' in part.when) ? (part.when as RawMultipartWhenCondition).facing : undefined;
+      const facing = (part.when && 'facing' in part.when) ? part.when.facing : undefined;
       let extraX = 0;
       const extraY = 0;
       if (facing === 'down') {
@@ -1636,7 +1555,7 @@ export class CreateModLoader {
       }
       const rotX = ((apply?.x ?? 0) + extraX) % 360;
       const rotY = ((apply?.y ?? 0) + extraY) % 360;
-      def.multipart.push({ apply: { model: gearModel, x: rotX, y: rotY, uvlock: apply?.uvlock }, when: part.when });
+      def.multipart!.push({ apply: { model: gearModel, x: rotX, y: rotY, uvlock: apply?.uvlock }, when: part.when });
     }
     def._gearsInjected = true;
   }
@@ -1708,7 +1627,7 @@ export class CreateModLoader {
       for (const apply of applies) {
         const rotX = (apply?.x ?? 0) % 360;
         const rotY = (apply?.y ?? 0) % 360;
-        def.multipart.push({ apply: { model: cogModelId, x: rotX, y: rotY, uvlock: apply?.uvlock }, when: part.when });
+        def.multipart!.push({ apply: { model: cogModelId, x: rotX, y: rotY, uvlock: apply?.uvlock }, when: part.when });
       }
     }
 
@@ -1797,6 +1716,9 @@ export class CreateModLoader {
     if (def.variants) {
       for (const key in def.variants) {
         const variant = def.variants[key];
+        if (!variant) {
+          continue;
+        }
         if (Array.isArray(variant)) {
           variant.forEach(v => {
             if (v.model) {

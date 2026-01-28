@@ -12,11 +12,22 @@ declare type ModelVariant = {
 declare type ModelVariantEntry = ModelVariant | (ModelVariant & {
   weight?: number;
 })[];
-declare type ModelMultiPartCondition = {
+export type ModelMultiPartCondition = {
   OR?: ModelMultiPartCondition[];
   AND?: ModelMultiPartCondition[];
-} | {
-  [key: string]: string;
+  waterlogged?: string;
+  facing?: string;
+  face?: string;
+  axis_along_first?: string;
+  flipped?: string;
+
+  axis?: string;
+  up?: string;
+  down?: string;
+  north?: string;
+  south?: string;
+  east?: string;
+  west?: string;
 };
 declare type ModelMultiPart = {
   when?: ModelMultiPartCondition;
