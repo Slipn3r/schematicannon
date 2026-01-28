@@ -143,10 +143,48 @@ export async function importCreateVersionResources (version: string, jarUrl: str
     const extractedDir = join(tempExtract, 'assets', 'create');
     execSync(`cp -R "${extractedDir}/"* "${baseDir}/"`);
 
+    await ensureModelManifest(baseDir);
+
     await rm(tempExtract, { recursive: true, force: true }).catch(() => {
     });
   } finally {
     await rm(jarPath).catch(() => {
     });
   }
+}
+
+async function collectModelIds (dir: string, relativePath = '', bucket = new Set<string>()): Promise<Set<string>> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const nextPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      await collectModelIds(join(dir, entry.name), nextPath, bucket);
+      continue;
+    }
+    if (!entry.isFile() || !entry.name.endsWith('.json')) {
+      continue;
+    }
+    const withoutExtension = nextPath.replace(/\.json$/, '');
+    bucket.add(`create:${withoutExtension}`);
+  }
+  return bucket;
+}
+
+async function ensureModelManifest (basePath: string) {
+  const modelsDir = join(basePath, 'models');
+  try {
+    const s = await stat(modelsDir);
+    if (!s.isDirectory()) {
+      // Should not happen if we just extracted
+      return;
+    }
+  } catch {
+    return;
+  }
+
+  const ids = Array.from(await collectModelIds(modelsDir));
+  ids.sort();
+  const manifestPath = join(basePath, 'model_manifest.json');
+  await writeFile(manifestPath, JSON.stringify(ids, null, 2) + '\n', 'utf-8');
+  console.log(`[model_manifest] Wrote ${ids.length} entries to ${manifestPath}`);
 }
