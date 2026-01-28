@@ -23,14 +23,17 @@ export class StaticVisual extends AbstractBlockEntityVisual {
     this.instance.translate(pos[0], pos[1], pos[2]);
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   update (_partialTick: number): void {
     // No-op
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   beginFrame (_context: unknown): void {
     // No-op for static visuals
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   updateLight (_partialTick: number): void {
     // TODO: Update light
   }
