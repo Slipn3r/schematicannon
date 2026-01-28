@@ -6,7 +6,7 @@ import { RawBlockModel, RawBlockState, RawModelElement, RawMultipartWhen } from 
 
 const DEFAULT_ASSETS_BASE = './assets/create';
 const SUBPART_TOKENS = ['head', 'blade', 'pole', 'cog', 'cogwheel', 'pointer', 'flap', 'hand', 'fan', 'shaft', 'arm', 'middle', 'hose', 'top', 'belt', 'claw', 'body'];
-const AUTO_SUBPART_BLOCKS = ['funnel', 'tunnel', 'spout', 'mechanical_mixer', 'mechanical_pump', 'portable_storage_interface', 'mechanical_saw', 'mechanical_drill', 'deployer', 'mechanical_press', 'analog_lever', 'hand_crank', 'weighted_ejector'];
+const AUTO_SUBPART_BLOCKS = ['funnel', 'tunnel', 'spout', 'mechanical_mixer', 'mechanical_pump', 'portable_storage_interface', 'mechanical_saw', 'mechanical_drill', 'deployer', 'mechanical_press', 'analog_lever', 'hand_crank', 'weighted_ejector', 'create:water_wheel', 'mechanical_roller'];
 
 export interface LoadedAssets {
   blockDefinitions: Record<string, BlockDefinition>;
@@ -1152,8 +1152,7 @@ export class CreateModLoader {
 
           this.fetchedBlockModels.set(cleanPath, {
             ...modelJson,
-            elements: undefined,
-            customMeshParts: parts
+            elements: parts,
           });
 
           // Ensure parent is loaded (often contains texture definitions)
