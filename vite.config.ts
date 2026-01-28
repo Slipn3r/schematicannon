@@ -17,7 +17,7 @@ export default defineConfig({
         index: 'src/index.ts',
         cli: 'src/cli/index.ts'
       },
-      name: 'limestone',
+      name: 'schematicannon',
       fileName: (format, entryName) => `${entryName}.${format === 'es' ? 'js' : 'cjs'}`,
       formats: ['es', 'cjs']
     },

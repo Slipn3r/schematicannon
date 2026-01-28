@@ -1,4 +1,4 @@
-# Limestone
+# Schematicannon
 
 Library for rendering [Create Mod](https://github.com/Creators-of-Create/Create) schematics on top of the [Deepslate](https://github.com/misode/deepslate) vanilla Minecraft renderer.
 
@@ -11,17 +11,17 @@ Library for rendering [Create Mod](https://github.com/Creators-of-Create/Create)
 ## Installation
 
 ```bash
-pnpm add limestone
+pnpm add schematicannon
 ```
 
 ## Setup
 
 ### 1. Generate Assets
 
-Limestone requires assets (models, textures, blockstates) from Minecraft and the Create mod. Use the CLI to download and extract them:
+Schematicannon requires assets (models, textures, blockstates) from Minecraft and the Create mod. Use the CLI to download and extract them:
 
 ```bash
-pnpx limestone generate-assets -d ./assets
+pnpx schematicannon generate-assets -d ./assets
 ```
 or after installation:
 
@@ -32,7 +32,7 @@ pnpm generate-assets
 ### 2. Implementation
 
 ```typescript
-import { createStructureViewer } from 'limestone';
+import { createStructureViewer } from 'schematicannon';
 
 const viewer = createStructureViewer({
   canvas: document.getElementById('viewport') as HTMLCanvasElement,
@@ -58,7 +58,7 @@ await viewer.loadStructure(buffer);
 
 ## CLI Reference
 
-`npx limestone generate-assets [options]`
+`npx schematicannon generate-assets [options]`
 
 - `-d, --directory <path>`: Output directory (default: `./assets`)
 - `--clear`: Clear output directory before starting.

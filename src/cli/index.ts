@@ -8,8 +8,8 @@ import { importMinecraftVersionResources, importCreateVersionResources } from '.
 const program = new Command();
 
 program
-  .name('limestone')
-  .description('CLI tool for Limestone library')
+  .name('schematicannon')
+  .description('CLI tool for Schematicannon library')
   .version('0.1.0');
 
 program

@@ -69,7 +69,7 @@ export async function loadResourcesForStructure (structure: Structure, options: 
   const manifestPromise = options.modelManifest
     ? Promise.resolve(undefined)
     : loadCreateModelManifest(createProvider).catch(err => {
-      console.warn('[limestone resources] Failed to load Create model manifest', err);
+      console.warn('[schematicannon resources] Failed to load Create model manifest', err);
       return undefined;
     });
 

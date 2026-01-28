@@ -1,5 +1,5 @@
 {
-  "name": "limestone",
+  "name": "schematicannon",
   "version": "0.1.0",
   "description": "Library for rendering Create mod schematics in the browser",
   "type": "module",
@@ -7,7 +7,7 @@
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "limestone": "./dist/cli.js"
+    "schematicannon": "./dist/cli.js"
   },
   "exports": {
     ".": {
