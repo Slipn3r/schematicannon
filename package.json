@@ -39,7 +39,7 @@
     "eslint": "^9.34.0",
     "eslint-plugin-unicorn": "^62.0.0",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3",
+    "typescript": "^5.8.2",
     "typescript-eslint": "^8.53.1",
     "vite": "^6.3.5",
     "vite-plugin-dts": "^4.5.4",

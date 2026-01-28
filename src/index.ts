@@ -6,5 +6,6 @@ export * from './api/events.js';
 export * from './loader/resourceProvider.js';
 export * from './loader/versions.js';
 export * from './flywheel/flywheel.js';
-export * as deepslate from 'deepslate';
+import * as deepslate from 'deepslate';
+export { deepslate };
 
