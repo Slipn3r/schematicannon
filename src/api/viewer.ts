@@ -3,6 +3,7 @@ import { Flywheel } from '../flywheel/Flywheel.js';
 import { RotatingVisual } from '../flywheel/lib/visual/RotatingVisual.js';
 import { StaticVisual } from '../flywheel/lib/visual/StaticVisual.js';
 import type { Structure } from 'deepslate';
+import type { BlockPos } from 'deepslate/core';
 import { StructureRenderer } from 'deepslate/render';
 import { loadResourcesForStructure, type ResourceBundle } from './resources.js';
 import { loadStructureFromNbt } from './nbt.js';
@@ -247,11 +248,11 @@ export function createStructureViewer (options: ViewerOptions) {
       });
 
       const renderPlan = planBuilder(structure.getBlocks(), resourcesBundle.resources, mesh => uploadMeshBuffers(gl, mesh));
-      const filteredStructure = {
+      const filteredStructure: Structure = {
         getSize: () => structure.getSize(),
         getBlocks: () => structure.getBlocks().filter(b => !renderPlan.flywheelBlocks.has(b.state.getName().toString())),
-        getBlock: (pos: Vec3) => {
-          const block = structure.getBlock(pos as any);
+        getBlock: (pos: BlockPos) => {
+          const block = structure.getBlock(pos);
           if (!block || renderPlan.flywheelBlocks.has(block.state.getName().toString())) {
             return null;
           }
@@ -259,7 +260,7 @@ export function createStructureViewer (options: ViewerOptions) {
         }
       };
 
-      state.renderer = new StructureRenderer(gl, filteredStructure as any, resourcesBundle.resources, { chunkSize: 8, useInvisibleBlockBuffer: false }) as StructureRenderer & { atlasTexture: WebGLTexture };
+      state.renderer = new StructureRenderer(gl, filteredStructure, resourcesBundle.resources, { chunkSize: 8, useInvisibleBlockBuffer: false }) as StructureRenderer & { atlasTexture: WebGLTexture };
       state.renderer.updateStructureBuffers();
 
       state.flywheel = new Flywheel(gl);
@@ -272,9 +273,9 @@ export function createStructureViewer (options: ViewerOptions) {
       for (const block of renderPlan.blocks) {
         for (const part of block.parts) {
           if (part.motion && part.motion.kind === 'spin') {
-            state.visuals.push(new RotatingVisual({ instancerProvider: () => state.flywheel!, partialTick: () => 0 }, block.pos as any, part.mesh, part.motion.axis, part.motion.speed));
+            state.visuals.push(new RotatingVisual({ instancerProvider: () => state.flywheel!, partialTick: () => 0 }, block.pos, part.mesh, part.motion.axis, part.motion.speed));
           } else {
-            state.visuals.push(new StaticVisual({ instancerProvider: () => state.flywheel!, partialTick: () => 0 }, block.pos as any, part.mesh));
+            state.visuals.push(new StaticVisual({ instancerProvider: () => state.flywheel!, partialTick: () => 0 }, block.pos, part.mesh));
           }
         }
       }

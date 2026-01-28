@@ -37,7 +37,7 @@ export function blockModelHasGeometry (model: BlockModel): boolean {
   return model.elements && model.elements.length > 0;
 }
 
-export function createBlockModelFromJson (data: RawBlockModel, name: Identifier): BlockModel {
+export function createBlockModelFromJson (data: RawBlockModel): BlockModel {
   const parent = data.parent ? Identifier.parse(data.parent) : undefined;
   const textures = data.textures ?? {};
   const elements = data.elements as RawModelElement[];

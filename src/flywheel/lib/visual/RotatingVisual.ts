@@ -53,13 +53,13 @@ export class RotatingVisual extends AbstractBlockEntityVisual implements Dynamic
     this.instance.translate(-0.5, -0.5, -0.5); // Un-center
   }
 
-  update (_partialTick: number): void {
+  update (): void {
     // Ticking update
     this.rotation += this.speed;
     this.rotation %= (Math.PI * 2);
   }
 
-  updateLight (_partialTick: number): void {
+  updateLight (): void {
     // TODO: Update light
   }
 

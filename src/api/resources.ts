@@ -236,7 +236,7 @@ export async function loadResourcesForStructure (structure: Structure, options: 
   const blockModels: Record<string, BlockModel> = {};
   Object.keys(vanilla.blockModels).forEach(id => {
     const modelId = Identifier.parse('minecraft:' + id);
-    blockModels[modelId.toString()] = createBlockModelFromJson(vanilla.blockModels[id], modelId);
+    blockModels[modelId.toString()] = createBlockModelFromJson(vanilla.blockModels[id]);
   });
   Object.keys(modAssets.blockModels).forEach(id => {
     blockModels[id] = modAssets.blockModels[id];

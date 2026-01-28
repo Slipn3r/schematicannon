@@ -242,10 +242,8 @@ export class Flywheel implements InstancerProvider {
           instancer.instanceCount
         );
         unbindInstanceAttrs(locs);
-      }
-
-      // Draw textured quads
-      else if (model.quadVertices() > 0 && model.posBuffer && model.textureBuffer && model.normalBuffer && model.indexBuffer) {
+      } else if (model.quadVertices() > 0 && model.posBuffer && model.textureBuffer && model.normalBuffer && model.indexBuffer) {
+        // Draw textured quads
         const program = this.shader.getProgram();
         gl.useProgram(program);
         const locView = gl.getUniformLocation(program, 'mView');

@@ -1,5 +1,4 @@
 import { BlockDefinition, BlockModel } from 'deepslate';
-import { Identifier } from 'deepslate/core';
 import { createBlockModelFromJson } from './deepslate_extensions';
 import { parseObj } from './obj_loader.js';
 import { RawBlockModel, RawBlockState, RawModelElement, RawMultipartWhen, RawBlockStateVariant, RawMultipartCase } from '../types/assets.js';
@@ -152,7 +151,7 @@ export class CreateModLoader {
       // We only care about create models here. Vanilla models are handled by the main app.
       // If a Create model parents a Vanilla model, Deepslate needs to be able to find it.
       // For now, we assume we return all fetched Create models.
-      models[modelId] = createBlockModelFromJson(json, Identifier.parse(modelId));
+      models[modelId] = createBlockModelFromJson(json);
     });
 
     this.fetchedTextures.forEach((blob, key) => {
@@ -328,13 +327,34 @@ export class CreateModLoader {
             const facing = when?.facing;
             const norm = (v: number) => ((v % 360) + 360) % 360;
             switch (facing) {
-              case 'north': apply.x = 0; apply.y = 0; break;
-              case 'south': apply.x = 0; apply.y = 180; break;
-              case 'east': apply.x = 0; apply.y = 90; break;
-              case 'west': apply.x = 0; apply.y = 270; break;
-              case 'up': apply.x = 270; apply.y = 0; break;
-              case 'down': apply.x = 90; apply.y = 0; break;
-              default: apply.x = norm(apply.x ?? 0); apply.y = norm(apply.y ?? 0); break;
+              case 'north':
+                apply.x = 0;
+                apply.y = 0;
+                break;
+              case 'south':
+                apply.x = 0;
+                apply.y = 180;
+                break;
+              case 'east':
+                apply.x = 0;
+                apply.y = 90;
+                break;
+              case 'west':
+                apply.x = 0;
+                apply.y = 270;
+                break;
+              case 'up':
+                apply.x = 270;
+                apply.y = 0;
+                break;
+              case 'down':
+                apply.x = 90;
+                apply.y = 0;
+                break;
+              default:
+                apply.x = norm(apply.x ?? 0);
+                apply.y = norm(apply.y ?? 0);
+                break;
             }
           }
           // Drill head should align to facing rather than inheriting casing x/y which aim the body.
@@ -342,13 +362,32 @@ export class CreateModLoader {
             const facing = when?.facing;
             const norm = (v: number) => ((v % 360) + 360) % 360;
             switch (facing) {
-              case 'north': apply.x = 0; apply.y = norm(0); break;
-              case 'south': apply.x = 0; apply.y = norm(180); break;
-              case 'east': apply.x = 0; apply.y = norm(270); break;
-              case 'west': apply.x = 0; apply.y = norm(90); break;
-              case 'up': apply.x = norm(90); apply.y = 0; break;
-              case 'down': apply.x = norm(270); apply.y = 0; break;
-              default: break;
+              case 'north':
+                apply.x = 0;
+                apply.y = norm(0);
+                break;
+              case 'south':
+                apply.x = 0;
+                apply.y = norm(180);
+                break;
+              case 'east':
+                apply.x = 0;
+                apply.y = norm(270);
+                break;
+              case 'west':
+                apply.x = 0;
+                apply.y = norm(90);
+                break;
+              case 'up':
+                apply.x = norm(90);
+                apply.y = 0;
+                break;
+              case 'down':
+                apply.x = norm(270);
+                apply.y = 0;
+                break;
+              default:
+                break;
             }
           }
           const key = `${candidate}|${apply.x ?? 0}|${apply.y ?? 0}|${apply.z ?? 0}|${apply.uvlock ?? false}|${JSON.stringify(when ?? {})}`;
@@ -395,7 +434,7 @@ export class CreateModLoader {
         if (!modelName || !sourceModelMatch(modelName)) {
           continue;
         }
-        const facing = (when as any)?.facing as string | undefined;
+        const facing = (when && 'facing' in when) ? (when as RawMultipartWhenCondition).facing : undefined;
         if (facing === 'up' || facing === 'down') {
           continue;
         }
@@ -441,7 +480,7 @@ export class CreateModLoader {
     if (!def.variants) {
       return;
     }
-    const multipart: any[] = [];
+    const multipart: RawMultipartCase[] = [];
 
     for (const key of Object.keys(def.variants)) {
       // Parse key "part=middle,slope=flat,..."
@@ -481,9 +520,8 @@ export class CreateModLoader {
             models.push('create:block/belt_casing/horizontal_pulley');
           }
         }
-      }
-      // Handle Slopes (Diagonal) - Simplified mapping
-      else {
+      } else {
+        // Handle Slopes (Diagonal) - Simplified mapping
         // Diagonal logic is complex. Using heuristics.
         if (props.part === 'middle') {
           models.push('create:block/belt/diagonal_middle');
@@ -618,9 +656,9 @@ export class CreateModLoader {
 
     let sourceElements = source.elements;
     if (transform === 'rotate_x_90' && sourceElements) {
-      sourceElements = sourceElements.map((el: any) => this.rotateElementX90(el));
+      sourceElements = sourceElements.map(el => ('from' in el) ? this.rotateElementX90(el as RawModelElement) : el);
     } else if (transform === 'rotate_x_270' && sourceElements) {
-      sourceElements = sourceElements.map((el: any) => this.rotateElementX270(el));
+      sourceElements = sourceElements.map(el => ('from' in el) ? this.rotateElementX270(el as RawModelElement) : el);
     }
 
     // Merge elements
@@ -681,10 +719,10 @@ export class CreateModLoader {
     };
 
     if (newEl.faces) {
-      const newFaces: Record<string, any> = {};
+      const newFaces: Record<string, RawModelFace> = {};
       for (const [dir, face] of Object.entries(newEl.faces)) {
         const newDir = faceMap[dir] || dir;
-        newFaces[newDir] = face;
+        newFaces[newDir] = face as RawModelFace;
       }
       newEl.faces = newFaces;
     }
@@ -732,10 +770,10 @@ export class CreateModLoader {
     };
 
     if (newEl.faces) {
-      const newFaces: Record<string, any> = {};
+      const newFaces: Record<string, RawModelFace> = {};
       for (const [dir, face] of Object.entries(newEl.faces)) {
         const newDir = faceMap[dir] || dir;
-        newFaces[newDir] = face;
+        newFaces[newDir] = face as RawModelFace;
       }
       newEl.faces = newFaces;
     }
@@ -776,13 +814,13 @@ export class CreateModLoader {
     }
 
     // Find the core element (4,4,4 to 12,12,12)
-    const core = json.elements.find((e: any) => e.from && e.to
+    const core = json.elements.find((e): e is RawModelElement => 'from' in e
       && e.from[0] === 4 && e.from[1] === 4 && e.from[2] === 4
       && e.to[0] === 12 && e.to[1] === 12 && e.to[2] === 12);
 
     if (core) {
       const faces = ['north', 'south', 'east', 'west', 'up', 'down'];
-      const sampleFace = core.faces ? Object.values(core.faces)[0] as any : undefined;
+      const sampleFace = core.faces ? Object.values(core.faces)[0] as RawModelFace | undefined : undefined;
       const defaultUv = Array.isArray(sampleFace?.uv) && sampleFace.uv.length === 4 ? sampleFace.uv : [12, 8, 16, 12];
       const defaultTexture = sampleFace?.texture ?? '#0';
 
@@ -886,10 +924,10 @@ export class CreateModLoader {
     const lim: RawModelElement = { from: [0, 0, 0], to: [0, 0, 0], faces: {} };
     // Reuse whatever UV/texture the core already declared to avoid sampling missing atlas space.
     const core = Array.isArray(json.elements)
-      ? (json.elements as RawModelElement[]).find(e => e.from && e.to && e.from[0] === 4 && e.from[1] === 4 && e.from[2] === 4 && e.to[0] === 12 && e.to[1] === 12 && e.to[2] === 12)
+      ? (json.elements as (RawModelElement | ObjMeshPart)[]).find((e): e is RawModelElement => 'from' in e && e.from[0] === 4 && e.from[1] === 4 && e.from[2] === 4 && e.to[0] === 12 && e.to[1] === 12 && e.to[2] === 12)
       : undefined;
-    const pickFace = (name: string) => core?.faces ? (core.faces as any)[name] : undefined;
-    const sampleFace: any = pickFace(dir) || (core?.faces ? (Object.values(core?.faces ?? {})[0] as any) : undefined);
+    const pickFace = (name: string) => core?.faces ? (core.faces as Record<string, RawModelFace | undefined>)[name] : undefined;
+    const sampleFace = pickFace(dir) || (core?.faces ? (Object.values(core?.faces ?? {})[0] as RawModelFace | undefined) : undefined);
     const texRef = sampleFace?.texture ?? '#0';
     const uvForDir = (name: string) => {
       const face = pickFace(name);
@@ -900,7 +938,8 @@ export class CreateModLoader {
 
     // Geometry: Core is 4..12.
     if (dir === 'up') {
-      lim.from = [4, 12, 4]; lim.to = [12, 16, 12];
+      lim.from = [4, 12, 4];
+      lim.to = [12, 16, 12];
       lim.faces = {
         north: { texture: texRef, uv: uvSide },
         south: { texture: texRef, uv: uvSide },
@@ -909,7 +948,8 @@ export class CreateModLoader {
         up: { texture: texRef, uv: uvEnd }
       };
     } else if (dir === 'down') {
-      lim.from = [4, 0, 4]; lim.to = [12, 4, 12];
+      lim.from = [4, 0, 4];
+      lim.to = [12, 4, 12];
       lim.faces = {
         north: { texture: texRef, uv: uvSide },
         south: { texture: texRef, uv: uvSide },
@@ -918,7 +958,8 @@ export class CreateModLoader {
         down: { texture: texRef, uv: uvEnd }
       };
     } else if (dir === 'east') {
-      lim.from = [12, 4, 4]; lim.to = [16, 12, 12];
+      lim.from = [12, 4, 4];
+      lim.to = [16, 12, 12];
       lim.faces = {
         north: { texture: texRef, uv: uvSide },
         south: { texture: texRef, uv: uvSide },
@@ -927,7 +968,8 @@ export class CreateModLoader {
         east: { texture: texRef, uv: uvEnd }
       };
     } else if (dir === 'west') {
-      lim.from = [0, 4, 4]; lim.to = [4, 12, 12];
+      lim.from = [0, 4, 4];
+      lim.to = [4, 12, 12];
       lim.faces = {
         north: { texture: texRef, uv: uvSide },
         south: { texture: texRef, uv: uvSide },
@@ -936,7 +978,8 @@ export class CreateModLoader {
         west: { texture: texRef, uv: uvEnd }
       };
     } else if (dir === 'south') {
-      lim.from = [4, 4, 12]; lim.to = [12, 12, 16];
+      lim.from = [4, 4, 12];
+      lim.to = [12, 12, 16];
       lim.faces = {
         east: { texture: texRef, uv: uvSide },
         west: { texture: texRef, uv: uvSide },
@@ -945,7 +988,8 @@ export class CreateModLoader {
         south: { texture: texRef, uv: uvEnd }
       };
     } else if (dir === 'north') {
-      lim.from = [4, 4, 0]; lim.to = [12, 12, 4];
+      lim.from = [4, 4, 0];
+      lim.to = [12, 12, 4];
       lim.faces = {
         east: { texture: texRef, uv: uvSide },
         west: { texture: texRef, uv: uvSide },
@@ -1007,7 +1051,7 @@ export class CreateModLoader {
     delete modelJson.children;
   }
 
-  private mergeChildTextures (modelJson: any, child: any, childName: string) {
+  private mergeChildTextures (modelJson: RawBlockModel, child: RawBlockModel, childName: string) {
     const textures = modelJson.textures ?? (modelJson.textures = {});
     const mapping: Record<string, string> = {};
     const childTextures = child.textures;
@@ -1040,12 +1084,12 @@ export class CreateModLoader {
     return mapping;
   }
 
-  private remapElementTextures (element: any, textureMap: Record<string, string>) {
+  private remapElementTextures (element: RawModelElement, textureMap: Record<string, string>) {
     if (!element.faces) {
       return;
     }
     for (const face of Object.values(element.faces)) {
-      if (!face.texture || typeof face.texture !== 'string') {
+      if (!face || !face.texture || typeof face.texture !== 'string') {
         continue;
       }
       if (!face.texture.startsWith('#')) {
@@ -1103,7 +1147,7 @@ export class CreateModLoader {
           const parts = parseObj(objText);
 
           // Resolve all available textures (including from parents) to use for remapping
-          const collectTextures = (m: any): Record<string, string> => {
+          const collectTextures = (m: RawBlockModel): Record<string, string> => {
             const acc = m.parent ? collectTextures(this.fetchedBlockModels.get(this.normalizePath(m.parent)) || {}) : {};
             return { ...acc, ...(m.textures || {}) };
           };
@@ -1196,11 +1240,13 @@ export class CreateModLoader {
 
             const stripped = part.texture.startsWith('m_') ? part.texture.slice(2) : part.texture;
             if (textureKeys.has(stripped)) {
-              part.texture = stripped; continue;
+              part.texture = stripped;
+              continue;
             }
             const noHash = stripped.startsWith('#') ? stripped.slice(1) : stripped;
             if (textureKeys.has(noHash)) {
-              part.texture = noHash; continue;
+              part.texture = noHash;
+              continue;
             }
 
             // If we have mapped a material (e.g. 'log') but the texture key is actually '#log', handle that?
@@ -1409,7 +1455,7 @@ export class CreateModLoader {
       return;
     }
 
-    if (modelJson.elements.some((e: any) => (e.name ?? '').toLowerCase().includes('flap'))) {
+    if (modelJson.elements.some(e => ('name' in e && e.name ? e.name : '').toLowerCase().includes('flap'))) {
       return;
     }
     // Prefer the dark funnel back texture; alias it into the model so the atlas loads it.
@@ -1439,14 +1485,12 @@ export class CreateModLoader {
       [8, 11],
       [11, 14]
     ];
-    const before = modelJson.elements.length;
     for (const [z0, z1] of segments) {
       modelJson.elements.push(makeFlap([0.5, -2.5, z0], [1.5, 10.5, z1], 270, 90));
     }
     for (const [z0, z1] of segments.reverse()) {
       modelJson.elements.push(makeFlap([14.5, -2.5, z0], [15.5, 10.5, z1], 90, 270));
     }
-    const added = modelJson.elements.length - before;
   }
 
   private patchMechanicalRoller (model: RawBlockModel, cleanPath: string) {
@@ -1464,9 +1508,9 @@ export class CreateModLoader {
 
     for (const part of model.elements) {
       if ('mesh' in part && part.mesh && part.mesh.quads) {
-        const visited = new Set<any>();
+        const visited = new Set<unknown>();
         for (const quad of part.mesh.quads) {
-          const processVertex = (vert: any) => {
+          const processVertex = (vert: { pos: { x: number; y: number; z: number }; normal?: { x: number; y: number; z: number } }) => {
             if (!vert || !vert.pos || visited.has(vert)) {
               return;
             }
@@ -1514,11 +1558,12 @@ export class CreateModLoader {
   }
 
   private splitMechanicalArmElements (itemModel: RawBlockModel) {
-    const elements = Array.isArray(itemModel?.elements) ? itemModel.elements as RawModelElement[] : [];
-    const isCog = (el: RawModelElement) => (el.name ?? '').toLowerCase().includes('gear');
-    const clone = (el: RawModelElement) => JSON.parse(JSON.stringify(el));
+    const elements = Array.isArray(itemModel?.elements) ? itemModel.elements : [];
+    const isCog = (el: RawModelElement | ObjMeshPart): el is RawModelElement => 'from' in el && (el.name ?? '').toLowerCase().includes('gear');
+    const isBody = (el: RawModelElement | ObjMeshPart): el is RawModelElement => 'from' in el && !isCog(el);
+    const clone = (el: RawModelElement) => JSON.parse(JSON.stringify(el)) as RawModelElement;
     const cogElements = elements.filter(isCog).map(clone);
-    const bodyElements = elements.filter(el => !isCog(el)).map(clone);
+    const bodyElements = elements.filter(isBody).map(clone);
     return { bodyElements, cogElements, textures: itemModel?.textures ?? {} };
   }
 
@@ -1531,7 +1576,7 @@ export class CreateModLoader {
     if (!itemModel?.elements) {
       return;
     }
-    const gears = (itemModel.elements as RawModelElement[]).filter(el => (el.name ?? '').toLowerCase().includes('gear'));
+    const gears = (itemModel.elements as (RawModelElement | ObjMeshPart)[]).filter((el): el is RawModelElement => 'from' in el && (el.name ?? '').toLowerCase().includes('gear'));
     if (!gears.length) {
       return;
     }
@@ -1539,8 +1584,8 @@ export class CreateModLoader {
     // Build horizontal and vertical gear models
     const horizontalId = 'create:block/mechanical_crafter/gears_horizontal';
     const verticalId = 'create:block/mechanical_crafter/gears_vertical';
-    const horizModel = { parent: 'block/block', elements: gears, textures: { ...(itemModel.textures ?? {}) } };
-    const vertModel = { parent: 'block/block', elements: this.rotateElementsX90(gears), textures: { ...(itemModel.textures ?? {}) } };
+    const horizModel: RawBlockModel = { parent: 'block/block', elements: gears, textures: { ...(itemModel.textures ?? {}) } };
+    const vertModel: RawBlockModel = { parent: 'block/block', elements: this.rotateElementsX90(gears), textures: { ...(itemModel.textures ?? {}) } };
     this.fetchedBlockModels.set(horizontalId, horizModel);
     this.fetchedBlockModels.set(verticalId, vertModel);
 
@@ -1568,7 +1613,7 @@ export class CreateModLoader {
 
     ensureMultipart();
 
-    const pickGearModel = (when?: RawMultipartWhen) => {
+    const pickGearModel = () => {
       return horizontalId;
     };
 
@@ -1579,7 +1624,7 @@ export class CreateModLoader {
       }
       const gearModel = pickGearModel(part.when);
       const apply = Array.isArray(part.apply) ? part.apply[0] : part.apply;
-      const facing = (part.when as any)?.facing as string | undefined;
+      const facing = (part.when && 'facing' in part.when) ? (part.when as RawMultipartWhenCondition).facing : undefined;
       let extraX = 0;
       const extraY = 0;
       if (facing === 'down') {
@@ -1596,12 +1641,15 @@ export class CreateModLoader {
     def._gearsInjected = true;
   }
 
-  private async injectMechanicalArmCog (def: any) {
-    if ((def as any)._armCogInjected) {
+  private async injectMechanicalArmCog (def: RawBlockState & { _armCogInjected?: boolean }) {
+    if (def._armCogInjected) {
       return;
     }
     await this.loadModelRecursive('create:block/mechanical_arm/item');
     const itemModel = this.fetchedBlockModels.get('create:block/mechanical_arm/item');
+    if (!itemModel) {
+      return;
+    }
     const { cogElements, textures } = this.splitMechanicalArmElements(itemModel);
     if (!cogElements.length) {
       return;
@@ -1651,8 +1699,8 @@ export class CreateModLoader {
 
     ensureMultipart();
 
-    const baseParts = [...def.multipart];
-    for (const part of baseParts as any[]) {
+    const baseParts = [...(def.multipart as RawMultipartCase[])];
+    for (const part of baseParts) {
       if (!part.apply) {
         continue;
       }
@@ -1664,10 +1712,10 @@ export class CreateModLoader {
       }
     }
 
-    (def as any)._armCogInjected = true;
+    def._armCogInjected = true;
   }
 
-  private buildFunnelFallback (modelId: string): any | null {
+  private buildFunnelFallback (modelId: string): RawBlockModel | null {
     if (!modelId.startsWith('create:block/')) {
       return null;
     }
@@ -1786,13 +1834,13 @@ export class CreateModLoader {
     return path;
   }
 
-  private async fetchJson (url: string): Promise<any | null> {
+  private async fetchJson<T = unknown> (url: string): Promise<T | null> {
     try {
       const res = await fetch(url);
       if (!res.ok) {
         return null;
       }
-      return await res.json();
+      return await res.json() as T;
     } catch (e) {
       console.error(`Fetch error for ${url}`, e);
       return null;
