@@ -85,3 +85,16 @@ index 240a2a2fca7efe65616fbc74f19a58939b8e06df..ac8f1f5ec107808bcb6200e563a218c5
          const mesh = new Mesh();
          const [x0, y0, z0] = e.from;
          const [x1, y1, z1] = e.to;
+diff --git a/lib/render/StructureRenderer.d.ts b/lib/render/StructureRenderer.d.ts
+index dce46542c3806a79e9a4d6710739fddde02e4529..c47f580a1e570437ead2530c200a6ef038e1e4f8 100644
+--- a/lib/render/StructureRenderer.d.ts
++++ b/lib/render/StructureRenderer.d.ts
+@@ -32,7 +32,7 @@ export declare class StructureRenderer extends Renderer {
+     private gridMesh;
+     private readonly outlineMesh;
+     private invisibleBlocksMesh;
+-    private readonly atlasTexture;
++    readonly atlasTexture?: WebGLTexture;
+     useInvisibleBlocks: boolean;
+     private readonly chunkBuilder;
+     constructor(gl: WebGLRenderingContext, structure: StructureProvider, resources: Resources, options?: StructureRendererOptions);

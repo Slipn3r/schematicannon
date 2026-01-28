@@ -258,13 +258,13 @@ export function createStructureViewer (options: ViewerOptions) {
           }
           return block;
         }
-      } as any as Structure;
+      } as Structure;
 
-      state.renderer = new StructureRenderer(gl, filteredStructure as any, resourcesBundle.resources, { chunkSize: 8, useInvisibleBlockBuffer: false });
+      state.renderer = new StructureRenderer(gl, filteredStructure, resourcesBundle.resources, { chunkSize: 8, useInvisibleBlockBuffer: false });
       state.renderer.updateStructureBuffers();
 
       state.flywheel = new Flywheel(gl);
-      const atlasTexture = (state.renderer as any).atlasTexture as WebGLTexture | undefined;
+      const atlasTexture = state.renderer.atlasTexture;
       if (atlasTexture && state.flywheel) {
         state.flywheel.setTexture(atlasTexture);
       }
