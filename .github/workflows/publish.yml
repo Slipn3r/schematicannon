@@ -1,11 +1,11 @@
-name: Release
+name: Publish
 
 on:
   push:
     branches: [ main ]
 
 jobs:
-  release:
+  publish:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -18,7 +18,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: 'pnpm'
           registry-url: 'https://registry.npmjs.org'
       
@@ -56,6 +56,4 @@ jobs:
 
       - name: Publish to NPM
         if: steps.check_version.outputs.version_changed == 'true'
-        run: pnpm publish --no-git-checks --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: pnpm publish --no-git-checks --access public --provenance
