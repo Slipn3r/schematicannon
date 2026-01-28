@@ -2,7 +2,7 @@ import { execSync } from 'node:child_process';
 import { mkdir, writeFile, rm, stat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-export async function importMinecraftVersionResources (version: string) {
+export async function importMinecraftVersionResources (version: string, assetsDir: string = join(process.cwd(), 'assets')) {
   const branches = {
     summary: {
       'registries/data.min.json': 'items.json',
@@ -17,7 +17,7 @@ export async function importMinecraftVersionResources (version: string) {
     }
   };
 
-  const baseDir = join(process.cwd(), 'assets', 'minecraft', version);
+  const baseDir = join(assetsDir, 'minecraft', version);
   await mkdir(baseDir, { recursive: true });
 
   for (const [branch, files] of Object.entries(branches)) {
@@ -81,8 +81,8 @@ export async function importMinecraftVersionResources (version: string) {
   }
 }
 
-export async function hasCreateAssets (version: string): Promise<boolean> {
-  const base = join(process.cwd(), 'assets', 'create', version);
+export async function hasCreateAssets (version: string, assetsDir: string = join(process.cwd(), 'assets')): Promise<boolean> {
+  const base = join(assetsDir, 'create', version);
   const required = ['blockstates', 'models', 'textures'];
 
   for (const dir of required) {
@@ -103,13 +103,13 @@ export async function hasCreateAssets (version: string): Promise<boolean> {
   return true;
 }
 
-export async function importCreateVersionResources (version: string, jarUrl: string) {
-  if (await hasCreateAssets(version)) {
+export async function importCreateVersionResources (version: string, jarUrl: string, assetsDir: string = join(process.cwd(), 'assets')) {
+  if (await hasCreateAssets(version, assetsDir)) {
     console.log(`[Create ${version}] Skipping - assets already present.`);
     return;
   }
 
-  const baseDir = join(process.cwd(), 'assets', 'create', version);
+  const baseDir = join(assetsDir, 'create', version);
   await mkdir(baseDir, { recursive: true });
 
   const jarPath = join(process.cwd(), `temp-create-${version}.jar`);
