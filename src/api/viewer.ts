@@ -1,15 +1,15 @@
 import { glMatrix, mat4 } from 'gl-matrix';
-import { Flywheel } from '../flywheel/flywheel.js';
-import { RotatingVisual } from '../flywheel/lib/visual/rotatingVisual.js';
-import { StaticVisual } from '../flywheel/lib/visual/staticVisual.js';
+import { Flywheel } from '../flywheel/flywheel';
+import { RotatingVisual } from '../flywheel/lib/visual/rotatingVisual';
+import { StaticVisual } from '../flywheel/lib/visual/staticVisual';
 import type { Structure } from 'deepslate';
 import type { BlockPos } from 'deepslate/core';
 import { StructureRenderer } from 'deepslate/render';
-import { loadResourcesForStructure, type ResourceBundle } from './resources.js';
-import { loadStructureFromNbt } from './nbt.js';
+import { loadResourcesForStructure, type ResourceBundle } from './resources';
+import { loadStructureFromNbt } from './nbt';
 import type { Mesh } from 'deepslate/render';
 import type { Vertex } from 'deepslate/render';
-import { buildRenderPlan, type PlanBuilder } from './renderPlan.js';
+import { buildRenderPlan, type PlanBuilder } from './renderPlan';
 
 export type Vec3 = [number, number, number];
 

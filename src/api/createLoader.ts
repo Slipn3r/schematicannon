@@ -1,7 +1,7 @@
 import { BlockDefinition, BlockModel, Direction } from 'deepslate';
 import { createBlockModelFromJson, ModelMultiPartCondition } from './deepslateExtensions';
-import { parseObj, ObjMeshPart } from './objLoader.js';
-import { RawBlockModel, RawBlockState, RawModelElement, RawBlockStateVariant, RawMultipartCase, RawModelFace } from '../types/assets.js';
+import { parseObj, ObjMeshPart } from './objLoader';
+import { RawBlockModel, RawBlockState, RawModelElement, RawBlockStateVariant, RawMultipartCase, RawModelFace } from '../types/assets';
 
 const DEFAULT_ASSETS_BASE = './assets/create';
 const SUBPART_TOKENS = ['head', 'blade', 'pole', 'cog', 'cogwheel', 'pointer', 'flap', 'hand', 'fan', 'shaft', 'arm', 'middle', 'hose', 'top', 'belt', 'claw', 'body', 'wheel', 'roller', 'valve', 'handle', 'casing', 'guard'];

@@ -1,10 +1,10 @@
 import { BlockDefinition, BlockModel, Identifier, type Resources } from 'deepslate';
 import { describeBlockDefinition, createBlockModelFromJson, ModelMultiPartCondition } from './deepslateExtensions';
-import { mergeAtlases } from './atlasMerger.js';
+import { mergeAtlases } from './atlasMerger';
 import type { Structure, TextureAtlas } from 'deepslate';
-import { CreateModLoader, type CreateModLoaderOptions, type LoadedAssets } from './createLoader.js';
-import { loadCreateModelManifest, MODEL_MANIFEST_FILE } from './createModelManifest.js';
-import { RawBlockState, RawBlockModel } from '../types/assets.js';
+import { CreateModLoader, type CreateModLoaderOptions, type LoadedAssets } from './createLoader';
+import { loadCreateModelManifest, MODEL_MANIFEST_FILE } from './createModelManifest';
+import { RawBlockState, RawBlockModel } from '../types/assets';
 
 type FetchFn = typeof fetch;
 
