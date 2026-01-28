@@ -2,6 +2,7 @@ import { BlockDefinition, BlockModel } from 'deepslate';
 import { Identifier } from 'deepslate/core';
 import { createBlockModelFromJson } from './deepslate_extensions';
 import { parseObj } from './obj_loader.js';
+import { RawBlockModel, RawBlockState, RawModelElement, RawMultipartWhen } from 'src/types/assets.js';
 
 const DEFAULT_ASSETS_BASE = './assets/create';
 const SUBPART_TOKENS = ['head', 'blade', 'pole', 'cog', 'cogwheel', 'pointer', 'flap', 'hand', 'fan', 'shaft', 'arm', 'middle', 'hose', 'top', 'belt', 'claw', 'body'];
@@ -20,8 +21,8 @@ export interface CreateModLoaderOptions {
 }
 
 export class CreateModLoader {
-  private readonly fetchedBlockDefinitions = new Map<string, any>();
-  private readonly fetchedBlockModels = new Map<string, any>();
+  // private readonly fetchedBlockDefinitions = new Map<string, any>();
+  private readonly fetchedBlockModels = new Map<string, RawBlockModel>();
   private readonly fetchedTextures = new Map<string, Blob>();
   private readonly enableAutoSubparts: boolean;
   private readonly autoSubpartLog: Array<{ blockId: string; baseModel: string; subpart: string; when: Record<string, string> | undefined }> = [];
@@ -41,8 +42,8 @@ export class CreateModLoader {
     this.modelManifest = new Set(options.modelManifest ?? []);
   }
 
-  private rotateElementsX90 (elements: any[]): any[] {
-    return elements.map(el => this.rotateElementX90(JSON.parse(JSON.stringify(el))));
+  private rotateElementsX90 (elements: RawModelElement[]): RawModelElement[] {
+    return elements.map(el => this.rotateElementX90(el));
   }
 
   public getAutoSubpartDebug () {
@@ -63,7 +64,7 @@ export class CreateModLoader {
 
       try {
         // 1. Fetch Block Definition (BlockState)
-        const defJson = await this.fetchJson(`${this.assetsBase}/blockstates/${id.replace('create:', '')}.json`);
+        const defJson = await this.fetchJson(`${this.assetsBase}/blockstates/${id.replace('create:', '')}.json`) as RawBlockState;
 
         if (defJson) {
           if (id === 'create:mechanical_crafter') {
@@ -1406,8 +1407,8 @@ export class CreateModLoader {
     return { bodyElements, cogElements, textures: itemModel?.textures ?? {} };
   }
 
-  private async injectMechanicalCrafterGears (def: any) {
-    if ((def as any)._gearsInjected) {
+  private async injectMechanicalCrafterGears (def: RawBlockState & { _gearsInjected?: boolean }) {
+    if (def._gearsInjected) {
       return;
     }
     await this.loadModelRecursive('create:block/mechanical_crafter/item');
@@ -1415,7 +1416,7 @@ export class CreateModLoader {
     if (!itemModel?.elements) {
       return;
     }
-    const gears = (itemModel.elements as any[]).filter(el => (el.name ?? '').toLowerCase().includes('gear'));
+    const gears = (itemModel.elements as RawModelElement[]).filter(el => (el.name ?? '').toLowerCase().includes('gear'));
     if (!gears.length) {
       return;
     }
@@ -1423,8 +1424,8 @@ export class CreateModLoader {
     // Build horizontal and vertical gear models
     const horizontalId = 'create:block/mechanical_crafter/gears_horizontal';
     const verticalId = 'create:block/mechanical_crafter/gears_vertical';
-    const horizModel = { parent: 'block/block', elements: JSON.parse(JSON.stringify(gears)), textures: { ...(itemModel.textures ?? {}) } };
-    const vertModel = { parent: 'block/block', elements: this.rotateElementsX90(JSON.parse(JSON.stringify(gears))), textures: { ...(itemModel.textures ?? {}) } };
+    const horizModel = { parent: 'block/block', elements: gears, textures: { ...(itemModel.textures ?? {}) } };
+    const vertModel = { parent: 'block/block', elements: this.rotateElementsX90(gears), textures: { ...(itemModel.textures ?? {}) } };
     this.fetchedBlockModels.set(horizontalId, horizModel);
     this.fetchedBlockModels.set(verticalId, vertModel);
 
@@ -1452,12 +1453,12 @@ export class CreateModLoader {
 
     ensureMultipart();
 
-    const pickGearModel = (when: Record<string, string> | undefined) => {
+    const pickGearModel = (when?: RawMultipartWhen) => {
       return horizontalId;
     };
 
-    const baseParts = [...def.multipart]; // snapshot to avoid iterating over appended parts
-    for (const part of baseParts as any[]) {
+    const baseParts = [...def.multipart!]; // snapshot to avoid iterating over appended parts
+    for (const part of baseParts) {
       if (!part.apply) {
         continue;
       }
@@ -1477,7 +1478,7 @@ export class CreateModLoader {
       const rotY = ((apply?.y ?? 0) + extraY) % 360;
       def.multipart.push({ apply: { model: gearModel, x: rotX, y: rotY, uvlock: apply?.uvlock }, when: part.when });
     }
-    (def as any)._gearsInjected = true;
+    def._gearsInjected = true;
   }
 
   private async injectMechanicalArmCog (def: any) {

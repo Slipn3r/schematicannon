@@ -1,7 +1,7 @@
 
-// fix: patch deepslate to expose private fields
 import { BlockDefinition, BlockModel } from 'deepslate';
 import { Identifier } from 'deepslate/core';
+import { RawBlockModel, RawModelElement } from 'src/types/assets';
 
 declare type ModelVariant = {
   model: string;
@@ -37,13 +37,11 @@ export function blockModelHasGeometry (model: BlockModel): boolean {
   return model.elements && model.elements.length > 0;
 }
 
-// fix: generate types for asset jsons
-export function createBlockModelFromJson (data: any, name: Identifier): BlockModel {
+export function createBlockModelFromJson (data: RawBlockModel, name: Identifier): BlockModel {
   const parent = data.parent ? Identifier.parse(data.parent) : undefined;
   const textures = data.textures ?? {};
-  const elements = data.elements;
+  const elements = data.elements as RawModelElement[];
   const display = data.display;
-  const guiLight = data.gui_light;
-  return new BlockModel(parent, textures, elements as any, display as any, guiLight as any);
+  return new BlockModel(parent, textures, elements, display);
 }
 
