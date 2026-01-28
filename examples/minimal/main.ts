@@ -1,6 +1,5 @@
 
-import { createStructureViewer } from '../../src';
-import { fetchModrinthCreateVersions, mapSupportedVersions } from '../../src/loader/versions';
+import { createStructureViewer, type SupportedVersions } from '../../src';
 
 const canvas = document.getElementById('viewport') as HTMLCanvasElement;
 const fileInput = document.getElementById('nbt-input') as HTMLInputElement;
@@ -33,7 +32,7 @@ if (!canvas) {
 
     statusEl.textContent = `Initializing viewer for Create ${currentCreateVersion} / MC ${currentMcVersion}`;
 
-    // Path to valid assets
+    // Path to assets
     const assetsBase = `assets/create/${currentCreateVersion}`;
     const vanillaBase = `assets/minecraft/${currentMcVersion}/`;
 
@@ -65,11 +64,14 @@ if (!canvas) {
     }
   };
 
-  // Fetch versions
-  fetchModrinthCreateVersions().then(modrinthVersions => {
-    const supported = mapSupportedVersions(modrinthVersions);
+  try {
+    const supportedVersionsResponse = await fetch('../../assets/supportedVersions.json');
+    if (!supportedVersionsResponse.ok) {
+      statusEl.textContent = 'Failed to load supported versions.';
+      throw new Error('Failed to load supported versions');
+    }
+    const supported: SupportedVersions = await supportedVersionsResponse.json();
 
-    // Fill Create versions
     supported.create.forEach(c => {
       const option = document.createElement('option');
       option.value = c.version;
@@ -99,12 +101,11 @@ if (!canvas) {
     createSelect.addEventListener('change', updateMcSelect);
     mcSelect.addEventListener('change', () => updateViewer());
 
-    // Initial fill
     updateMcSelect();
-  }).catch(e => {
+  } catch (e) {
     console.error(e);
-    statusEl.textContent = 'Failed to fetch versions.';
-  });
+    statusEl.textContent = 'Failed to load supported versions.';
+  }
 
   fileInput.addEventListener('change', async () => {
     const file = fileInput.files?.[0];
