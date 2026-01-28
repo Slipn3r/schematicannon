@@ -1118,7 +1118,9 @@ export class CreateModLoader {
               m_spruce_log_top: 'spruce_log_top'
             };
             for (const part of parts) {
-              if (materialMap[part.texture]) part.texture = materialMap[part.texture];
+              if (materialMap[part.texture]) {
+                part.texture = materialMap[part.texture];
+              }
             }
           }
 
@@ -1128,21 +1130,26 @@ export class CreateModLoader {
               roller_wheel: 'wheel'
             };
             for (const part of parts) {
-              if (materialMap[part.texture]) part.texture = materialMap[part.texture];
+              if (materialMap[part.texture]) {
+                part.texture = materialMap[part.texture];
+              }
             }
           }
 
           // 3. CHAIN CONVEYOR
           if (cleanPath.includes('chain_conveyor')) {
-             const materialMap: Record<string, string> = {
-               casing: 'conveyor_casing',
-               bullwheel: 'bullwheel',
-               axis: 'axis',
-               axis_top: 'axis_top'
-             };
-             for (const part of parts) {
-               if (materialMap[part.texture]) part.texture = materialMap[part.texture];
-             }
+            const materialMap: Record<string, string> = {
+              casing: 'conveyor_casing',
+              bullwheel: 'bullwheel',
+              axis: 'axis',
+              axis_top: 'axis_top',
+              port: 'conveyor_port'
+            };
+            for (const part of parts) {
+              if (materialMap[part.texture]) {
+                part.texture = materialMap[part.texture];
+              }
+            }
           }
 
           // 4. WATER WHEEL (and LARGE)
@@ -1156,7 +1163,9 @@ export class CreateModLoader {
               axis_top: 'axis_top'
             };
             for (const part of parts) {
-              if (materialMap[part.texture]) part.texture = materialMap[part.texture];
+              if (materialMap[part.texture]) {
+                part.texture = materialMap[part.texture];
+              }
             }
           }
 
@@ -1165,20 +1174,24 @@ export class CreateModLoader {
             const materialMap: Record<string, string> = {
               Material: '3'
             };
-             for (const part of parts) {
-              if (materialMap[part.texture]) part.texture = materialMap[part.texture];
+            for (const part of parts) {
+              if (materialMap[part.texture]) {
+                part.texture = materialMap[part.texture];
+              }
             }
           }
 
           // Generic OBJ texture remap
           const textureKeys = new Set(Object.keys(availableTextures));
-          // If a texture key maps to another variable (#ref), we should resolve it? 
+          // If a texture key maps to another variable (#ref), we should resolve it?
           // Deepslate does this later, but for remapping "m_name" -> "name", we need to know "name" exists.
 
           const defaultKey = textureKeys.has('0') ? '0' : undefined;
-          
+
           for (const part of parts) {
-            if (textureKeys.has(part.texture)) continue;
+            if (textureKeys.has(part.texture)) {
+              continue;
+            }
 
             const stripped = part.texture.startsWith('m_') ? part.texture.slice(2) : part.texture;
             if (textureKeys.has(stripped)) {
@@ -1203,27 +1216,31 @@ export class CreateModLoader {
           // Ensure declared textures are loaded
           // use availableTextures to access all inherited textures too
           for (const tex of Object.values(availableTextures)) {
-            if (!tex || typeof tex !== 'string') continue;
-            if (tex.startsWith('#')) continue;
+            if (!tex || typeof tex !== 'string') {
+              continue;
+            }
+            if (tex.startsWith('#')) {
+              continue;
+            }
             await this.loadTexture(tex);
           }
 
           modelJson.elements = parts;
         } else {
-             console.warn(`Failed to load OBJ: ${objUrl}`);
-             modelJson.elements = [];
+          console.warn(`Failed to load OBJ: ${objUrl}`);
+          modelJson.elements = [];
         }
         // Fall through to standard processing (which handles parents, but we already loaded parent)
         // We need to ensure we don't double-load parent or mess up
       }
 
       // Standard processing continues...
-      // 1. Check parent (Already done above for context, but standard logic does it again? 
+      // 1. Check parent (Already done above for context, but standard logic does it again?
       //    visitedModels check prevents double fetch, but we might want to avoid re-recursion overhead)
       if (modelJson.parent && !modelJson.loader?.includes('obj')) {
-         // Only load if not already handled or if not OBJ (OBJ block did it)
-         // Actually, if we loaded it above, loadModelRecursive returns early.
-         await this.loadModelRecursive(modelJson.parent);
+        // Only load if not already handled or if not OBJ (OBJ block did it)
+        // Actually, if we loaded it above, loadModelRecursive returns early.
+        await this.loadModelRecursive(modelJson.parent);
       }
 
       this.flattenCompositeChildren(modelJson);

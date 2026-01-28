@@ -44,15 +44,14 @@ export function parseObj (objData: string): ObjMeshPart[] {
     const type = parts[0];
 
     if (type === 'o' || type === 'g') {
-        flushPart();
-        // Ignore bounding boxes (Create mod convention)
-        if (parts[1]?.startsWith('Bounding')) {
-            ignoreCurrentObject = true;
-        } else {
-            ignoreCurrentObject = false;
-        }
-    } else if (ignoreCurrentObject) {
-         continue;
+      flushPart();
+      // Ignore bounding boxes (Create mod convention)
+      const name = parts[1] || '';
+      if (name.startsWith('Bounding')) {
+        ignoreCurrentObject = true;
+      } else {
+        ignoreCurrentObject = false;
+      }
     } else if (type === 'v') {
       positions.push(new Vector(
         parseFloat(parts[1]!) * scale,
@@ -69,7 +68,7 @@ export function parseObj (objData: string): ObjMeshPart[] {
     } else if (type === 'usemtl') {
       flushPart();
       currentMaterial = parts[1]!;
-    } else if (type === 'f') {
+    } else if (type === 'f' && !ignoreCurrentObject) {
       const vertices: Vertex[] = [];
       for (let i = 1; i < parts.length; i++) {
         const indices = parts[i]!.split('/');
