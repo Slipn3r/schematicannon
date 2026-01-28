@@ -1,6 +1,6 @@
 {
   "name": "schematicannon",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Library for rendering Create mod schematics in the browser",
   "type": "module",
   "main": "dist/index.cjs",
