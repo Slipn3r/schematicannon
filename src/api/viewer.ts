@@ -4,7 +4,7 @@ import { RotatingVisual } from '../flywheel/lib/visual/RotatingVisual.js';
 import { StaticVisual } from '../flywheel/lib/visual/StaticVisual.js';
 import type { Structure } from 'deepslate';
 import { StructureRenderer } from 'deepslate/render';
-import { loadResourcesForStructure } from './resources.js';
+import { loadResourcesForStructure, type ResourceBundle } from './resources.js';
 import { loadStructureFromNbt } from './nbt.js';
 import type { Mesh } from 'deepslate/render';
 import type { Vertex } from 'deepslate/render';
@@ -13,7 +13,7 @@ import { buildRenderPlan, type PlanBuilder } from './render_plan.js';
 export type Vec3 = [number, number, number];
 
 export type ViewerState = {
-  renderer: StructureRenderer | null;
+  renderer: (StructureRenderer & { atlasTexture?: WebGLTexture }) | null;
   flywheel: Flywheel | null;
   visuals: (RotatingVisual | StaticVisual)[];
   structure: Structure | null;
@@ -54,11 +54,11 @@ export function uploadMeshBuffers (gl: WebGLRenderingContext, mesh: Mesh) {
       const d1 = v2.sub(v1);
       const d2 = v3.sub(v1);
 
-      const cx = d1.y * d2.z - d1.z * d2.y;
-      const cy = d1.z * d2.x - d1.x * d2.z;
-      const cz = d1.x * d2.y - d1.y * d2.x;
+      const cx = (d1.y * d2.z) - (d1.z * d2.y);
+      const cy = (d1.z * d2.x) - (d1.x * d2.z);
+      const cz = (d1.x * d2.y) - (d1.y * d2.x);
 
-      const len = Math.sqrt(cx * cx + cy * cy + cz * cz) || 1;
+      const len = Math.sqrt((cx * cx) + (cy * cy) + (cz * cz)) || 1;
       const nx = cx / len;
       const ny = cy / len;
       const nz = cz / len;
@@ -241,32 +241,29 @@ export function createStructureViewer (options: ViewerOptions) {
       const nbt = await file.arrayBuffer();
       const structure = await loadStructureFromNbt(nbt);
       setStatus('Fetching assets...');
-      const resourcesBundle = await loadResourcesForStructure(structure, {
+      const resourcesBundle: ResourceBundle = await loadResourcesForStructure(structure, {
         assetsBase: options.assetsBase,
         vanillaBase: options.vanillaBase
       });
 
-      const renderPlan = planBuilder(structure.getBlocks(), resourcesBundle.resources as any, mesh => uploadMeshBuffers(gl, mesh));
+      const renderPlan = planBuilder(structure.getBlocks(), resourcesBundle.resources, mesh => uploadMeshBuffers(gl, mesh));
       const filteredStructure = {
         getSize: () => structure.getSize(),
         getBlocks: () => structure.getBlocks().filter(b => !renderPlan.flywheelBlocks.has(b.state.getName().toString())),
         getBlock: (pos: Vec3) => {
           const block = structure.getBlock(pos as any);
-          if (!block) {
-            return null;
-          }
-          if (renderPlan.flywheelBlocks.has(block.state.getName().toString())) {
+          if (!block || renderPlan.flywheelBlocks.has(block.state.getName().toString())) {
             return null;
           }
           return block;
         }
       };
 
-      state.renderer = new StructureRenderer(gl, filteredStructure as any, resourcesBundle.resources as any, { chunkSize: 8, useInvisibleBlockBuffer: false });
+      state.renderer = new StructureRenderer(gl, filteredStructure as any, resourcesBundle.resources, { chunkSize: 8, useInvisibleBlockBuffer: false }) as StructureRenderer & { atlasTexture: WebGLTexture };
       state.renderer.updateStructureBuffers();
 
       state.flywheel = new Flywheel(gl);
-      const atlasTexture = (state.renderer as any).atlasTexture;
+      const atlasTexture = state.renderer.atlasTexture;
       if (atlasTexture) {
         state.flywheel.setTexture(atlasTexture);
       }

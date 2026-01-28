@@ -42,6 +42,20 @@ export type ReferenceFrame =
   | 'ground'
   | 'fixed';
 
+import type { Mesh } from 'deepslate/render';
+
+export interface ExtendedMesh extends Mesh {
+  id?: string;
+  colorOnly?: boolean;
+}
+
+export interface VariantLike {
+  model: string;
+  x?: number;
+  y?: number;
+  uvlock?: boolean;
+}
+
 export interface RawBlockModel {
   parent?: string;
   ambientocclusion?: boolean;
@@ -69,7 +83,11 @@ export interface RawMultipartWhenOR {
   OR: RawMultipartWhenCondition[];
 }
 
-export type RawMultipartWhen = RawMultipartWhenCondition | RawMultipartWhenOR;
+export interface RawMultipartWhenAND {
+  AND: RawMultipartWhenCondition[];
+}
+
+export type RawMultipartWhen = RawMultipartWhenCondition | RawMultipartWhenOR | RawMultipartWhenAND;
 
 export interface RawMultipartCase {
   when?: RawMultipartWhen;

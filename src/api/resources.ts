@@ -146,29 +146,29 @@ export async function loadResourcesForStructure (structure: Structure, options: 
     bucket.get(key)!.add(value);
   };
 
-  const normalizeWhenValue = (value: any) => {
+  const normalizeWhenValue = (value: string | boolean | number | undefined | null) => {
     if (value === undefined || value === null) {
       return '';
     }
     if (Array.isArray(value)) {
-      return value.map(v => String(v)).join('|');
+      return (value as (string | boolean | number)[]).map(v => String(v)).join('|');
     }
     return String(value);
   };
 
-  const collectFromWhen = (when: any, bucket: Map<string, Set<string>>) => {
+  const collectFromWhen = (when: RawMultipartWhen | undefined, bucket: Map<string, Set<string>>) => {
     if (!when) {
       return;
     }
-    if (Array.isArray(when.OR)) {
-      when.OR.forEach((c: any) => collectFromWhen(c, bucket));
+    if ('OR' in when && Array.isArray(when.OR)) {
+      when.OR.forEach(c => collectFromWhen(c, bucket));
       return;
     }
-    if (Array.isArray(when.AND)) {
-      when.AND.forEach((c: any) => collectFromWhen(c, bucket));
+    if ('AND' in when && Array.isArray(when.AND)) {
+      when.AND.forEach(c => collectFromWhen(c, bucket));
       return;
     }
-    Object.entries(when as Record<string, string>).forEach(([k, v]) => {
+    Object.entries(when as Record<string, string | boolean | number>).forEach(([k, v]) => {
       const normalized = normalizeWhenValue(v);
       normalized.split('|').forEach(option => recordProps(k, option, bucket));
     });

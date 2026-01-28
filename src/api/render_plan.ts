@@ -2,10 +2,11 @@ import { glMatrix, mat4 } from 'gl-matrix';
 import type { BlockPos } from 'deepslate/core';
 import { Identifier } from 'deepslate/core';
 import type { PlacedBlock } from 'deepslate/core';
-import type { BlockDefinition, BlockModel } from 'deepslate';
+import type { Resources } from 'deepslate';
 import { blockModelHasGeometry } from './deepslate_extensions';
 import { BlockColors } from 'deepslate/render';
 import type { Mesh } from 'deepslate/render';
+import type { ExtendedMesh, VariantLike } from '../types/assets';
 
 export type Axis = 'x' | 'y' | 'z';
 export interface MotionSpec {
@@ -31,23 +32,11 @@ export interface RenderPlan {
   flywheelBlocks: Set<string>;
 }
 
-export type Resources = {
-  getBlockDefinition(id: Identifier): BlockDefinition | undefined;
-  getBlockModel(id: Identifier): BlockModel | undefined;
-};
-
 export type PlanBuilder = (
   blocks: PlacedBlock[],
   resources: Resources,
   uploadMesh: (mesh: Mesh) => void
 ) => RenderPlan;
-
-interface VariantLike {
-  model: string;
-  x?: number;
-  y?: number;
-  uvlock?: boolean;
-}
 
 export function buildRenderPlan (
   blocks: PlacedBlock[],
@@ -83,7 +72,7 @@ export function buildRenderPlan (
       continue;
     }
 
-    const variants: VariantLike[] = def.getModelVariants(props);
+    const variants: VariantLike[] = def.getModelVariants(props) as VariantLike[];
 
     for (const variant of variants) {
       if (!modelOrientationMatches(id, props, variant.model)) {
@@ -123,7 +112,7 @@ export function buildRenderPlan (
       const scale = mat4.create();
       mat4.scale(scale, scale, [0.0625, 0.0625, 0.0625]);
       mesh.transform(scale);
-      (mesh as any).id = `${variant.model}_${variant.x ?? 0}_${variant.y ?? 0}`;
+      (mesh as ExtendedMesh).id = `${variant.model}_${variant.x ?? 0}_${variant.y ?? 0}`;
       uploadMesh(mesh);
 
       const motion = inferMotion(id, variant.model, props, variant);

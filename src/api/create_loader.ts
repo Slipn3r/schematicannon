@@ -262,7 +262,7 @@ export class CreateModLoader {
       modelUsage.get(norm)!.push({ apply: apply ? JSON.parse(JSON.stringify(apply)) : undefined, when: when ? JSON.parse(JSON.stringify(when)) : undefined });
     };
 
-    const pushMultipart = (apply: RawBlockStateVariant, when: any) => {
+    const pushMultipart = (apply: RawBlockStateVariant, when: RawMultipartWhen | undefined) => {
       multiparts.push({ apply, when });
       if (apply?.model) {
         recordUsage(apply.model, when, apply);
@@ -640,7 +640,7 @@ export class CreateModLoader {
     }
   }
 
-  private rotateElementX90 (element: any): any {
+  private rotateElementX90 (element: RawModelElement): RawModelElement {
     const newEl = JSON.parse(JSON.stringify(element));
     // Rotate around center (8, 8, 8) by 90 deg on X
     // y' = - (z - 8) + 8 = 16 - z
@@ -681,7 +681,7 @@ export class CreateModLoader {
     };
 
     if (newEl.faces) {
-      const newFaces: any = {};
+      const newFaces: Record<string, any> = {};
       for (const [dir, face] of Object.entries(newEl.faces)) {
         const newDir = faceMap[dir] || dir;
         newFaces[newDir] = face;
@@ -691,7 +691,7 @@ export class CreateModLoader {
     return newEl;
   }
 
-  private rotateElementX270 (element: any): any {
+  private rotateElementX270 (element: RawModelElement): RawModelElement {
     const newEl = JSON.parse(JSON.stringify(element));
     // Rotate around center (8, 8, 8) by 270 deg on X (or -90)
     // y' = (z - 8) + 8 = z
@@ -732,7 +732,7 @@ export class CreateModLoader {
     };
 
     if (newEl.faces) {
-      const newFaces: any = {};
+      const newFaces: Record<string, any> = {};
       for (const [dir, face] of Object.entries(newEl.faces)) {
         const newDir = faceMap[dir] || dir;
         newFaces[newDir] = face;
@@ -1476,7 +1476,8 @@ export class CreateModLoader {
             const oldZ = p.z;
             p.x = oldZ;
             p.z = 16 - oldX;
-            p.y -= 28;
+            // Shift it down by one block and slightly forward
+            p.y -= 16;
             p.z += 2;
             if (vert.normal) {
               const n = vert.normal;
@@ -1743,7 +1744,7 @@ export class CreateModLoader {
     await this.loadTexture(flowPath);
   }
 
-  private extractModelsFromDefinition (def: any): string[] {
+  private extractModelsFromDefinition (def: RawBlockState): string[] {
     const models = new Set<string>();
     if (def.variants) {
       for (const key in def.variants) {
@@ -1760,7 +1761,7 @@ export class CreateModLoader {
       }
     }
     if (def.multipart) {
-      def.multipart.forEach((part: any) => {
+      def.multipart.forEach(part => {
         if (part.apply) {
           const apply = part.apply;
           if (Array.isArray(apply)) {
