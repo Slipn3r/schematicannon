@@ -1,4 +1,4 @@
-import { TransformedInstance } from './TransformedInstance';
+import { TransformedInstance } from './transformedInstance';
 
 export const InstanceTypes = {
   TRANSFORMED: TransformedInstance.type

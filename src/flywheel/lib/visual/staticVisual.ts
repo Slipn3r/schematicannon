@@ -1,8 +1,8 @@
 import { BlockPos } from 'deepslate/core';
-import { VisualizationContext } from '../../api/visualization/VisualizationContext';
-import { InstanceTypes } from '../instance/InstanceTypes';
-import { TransformedInstance } from '../instance/TransformedInstance';
-import { AbstractBlockEntityVisual } from './AbstractBlockEntityVisual';
+import { VisualizationContext } from '../../api/visualization/visualizationContext';
+import { InstanceTypes } from '../instance/instanceTypes';
+import { TransformedInstance } from '../instance/transformedInstance';
+import { AbstractBlockEntityVisual } from './abstractBlockEntityVisual';
 
 export class StaticVisual extends AbstractBlockEntityVisual {
   private readonly instance: TransformedInstance;

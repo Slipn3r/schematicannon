@@ -1,4 +1,4 @@
-import { ObjMeshPart } from '../api/obj_loader.js';
+import { ObjMeshPart } from '../api/objLoader.js';
 import type { Direction } from 'deepslate/core';
 
 export interface RawModelElementRotation {
@@ -43,7 +43,7 @@ export type ReferenceFrame =
   | 'fixed';
 
 import type { Mesh } from 'deepslate/render';
-import { ModelMultiPartCondition } from 'src/api/deepslate_extensions.js';
+import { ModelMultiPartCondition } from 'src/api/deepslateExtensions.js';
 
 export interface ExtendedMesh extends Mesh {
   id?: string;

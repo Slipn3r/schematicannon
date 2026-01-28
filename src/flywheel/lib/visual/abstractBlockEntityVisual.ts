@@ -1,6 +1,6 @@
 import { BlockPos } from 'deepslate/core';
-import { Visual } from '../../api/visual/Visual';
-import { VisualizationContext } from '../../api/visualization/VisualizationContext';
+import { Visual } from '../../api/visual/visual';
+import { VisualizationContext } from '../../api/visualization/visualizationContext';
 
 export abstract class AbstractBlockEntityVisual implements Visual {
   constructor (

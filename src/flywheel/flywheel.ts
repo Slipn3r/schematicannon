@@ -1,11 +1,11 @@
 import type { mat4 } from 'gl-matrix';
 import { Mesh } from 'deepslate/render';
 import { ShaderProgram } from 'deepslate/render';
-import type { Instance } from './api/instance/Instance';
-import type { Instancer } from './api/instance/Instancer';
-import type { InstanceType } from './api/instance/InstanceType';
-import type { InstancerProvider } from './api/visualization/VisualizationContext';
-import { InstancerImpl } from './backend/instancing/InstancerImpl';
+import type { Instance } from './api/instance/instance';
+import type { Instancer } from './api/instance/instancer';
+import type { InstanceType } from './api/instance/instanceType';
+import type { InstancerProvider } from './api/visualization/visualizationContext';
+import { InstancerImpl } from './backend/instancing/instancerImpl';
 
 interface ExtendedMesh extends Mesh {
   colorOnly?: boolean;

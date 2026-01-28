@@ -1,9 +1,9 @@
 import { BlockPos } from 'deepslate/core';
-import { DynamicVisual } from '../../api/visual/Visual';
-import { VisualizationContext } from '../../api/visualization/VisualizationContext';
-import { InstanceTypes } from '../instance/InstanceTypes';
-import { TransformedInstance } from '../instance/TransformedInstance';
-import { AbstractBlockEntityVisual } from './AbstractBlockEntityVisual';
+import { DynamicVisual } from '../../api/visual/visual';
+import { VisualizationContext } from '../../api/visualization/visualizationContext';
+import { InstanceTypes } from '../instance/instanceTypes';
+import { TransformedInstance } from '../instance/transformedInstance';
+import { AbstractBlockEntityVisual } from './abstractBlockEntityVisual';
 import { Vec3 } from 'src/api/viewer';
 
 export class RotatingVisual extends AbstractBlockEntityVisual implements DynamicVisual {

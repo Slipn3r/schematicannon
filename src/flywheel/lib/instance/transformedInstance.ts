@@ -1,7 +1,7 @@
 import { mat4, vec3 } from 'gl-matrix';
-import { Instancer } from '../../api/instance/Instancer';
-import { InstanceType } from '../../api/instance/InstanceType';
-import { AbstractInstance } from './AbstractInstance';
+import { Instancer } from '../../api/instance/instancer';
+import { InstanceType } from '../../api/instance/instanceType';
+import { AbstractInstance } from './abstractInstance';
 
 export class TransformedInstance extends AbstractInstance {
   public readonly transform: mat4;

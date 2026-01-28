@@ -1,7 +1,7 @@
-import type { Instance } from '../../api/instance/Instance';
-import type { Instancer } from '../../api/instance/Instancer';
-import type { InstanceType } from '../../api/instance/InstanceType';
-import { GlBuffer } from '../gl/GlBuffer';
+import type { Instance } from '../../api/instance/instance';
+import type { Instancer } from '../../api/instance/instancer';
+import type { InstanceType } from '../../api/instance/instanceType';
+import { GlBuffer } from '../gl/glBuffer';
 
 export class InstancerImpl<D extends Instance> implements Instancer<D> {
   public _model?: unknown;

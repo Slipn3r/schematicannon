@@ -1,6 +1,6 @@
 import { BlockDefinition, BlockModel, Direction } from 'deepslate';
-import { createBlockModelFromJson, ModelMultiPartCondition } from './deepslate_extensions';
-import { parseObj, ObjMeshPart } from './obj_loader.js';
+import { createBlockModelFromJson, ModelMultiPartCondition } from './deepslateExtensions';
+import { parseObj, ObjMeshPart } from './objLoader.js';
 import { RawBlockModel, RawBlockState, RawModelElement, RawBlockStateVariant, RawMultipartCase, RawModelFace } from '../types/assets.js';
 
 const DEFAULT_ASSETS_BASE = './assets/create';

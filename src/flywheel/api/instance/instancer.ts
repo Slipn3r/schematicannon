@@ -1,4 +1,4 @@
-import { Instance } from './Instance';
+import { Instance } from './instance';
 
 export interface Instancer<D extends Instance> {
   createInstance(): D;

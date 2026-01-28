@@ -1,6 +1,6 @@
 import { BlockPos } from 'deepslate/core';
-import { Instance } from '../../api/instance/Instance';
-import { Instancer } from '../../api/instance/Instancer';
+import { Instance } from '../../api/instance/instance';
+import { Instancer } from '../../api/instance/instancer';
 
 export abstract class AbstractInstance implements Instance {
   protected pos: BlockPos = BlockPos.ZERO;

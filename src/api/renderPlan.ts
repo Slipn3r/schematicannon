@@ -3,7 +3,7 @@ import type { BlockPos } from 'deepslate/core';
 import { Identifier } from 'deepslate/core';
 import type { PlacedBlock } from 'deepslate/core';
 import type { Resources } from 'deepslate';
-import { blockModelHasGeometry } from './deepslate_extensions';
+import { blockModelHasGeometry } from './deepslateExtensions';
 import { BlockColors } from 'deepslate/render';
 import type { Mesh, Cull } from 'deepslate/render';
 import type { ExtendedMesh, VariantLike } from '../types/assets';

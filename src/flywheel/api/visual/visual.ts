@@ -1,4 +1,4 @@
-import { VisualizationContext } from '../visualization/VisualizationContext';
+import { VisualizationContext } from '../visualization/visualizationContext';
 
 export interface Visual {
   update(partialTick: number): void;
