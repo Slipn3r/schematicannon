@@ -9,7 +9,9 @@ import { loadResourcesForStructure, type ResourceBundle } from './resources';
 import { loadStructureFromNbt } from './nbt';
 import type { Mesh } from 'deepslate/render';
 import type { Vertex } from 'deepslate/render';
-import { buildRenderPlan, type PlanBuilder } from './renderPlan';
+import { buildRenderPlan, type PlanBuilder } from './renderPlan.js';
+import { LimestoneObserver } from './events.js';
+import { ResourceProvider, FetchResourceProvider } from '../loader/resourceProvider.js';
 
 export type Vec3 = [number, number, number];
 
@@ -103,14 +105,11 @@ export function uploadMeshBuffers (gl: WebGLRenderingContext, mesh: Mesh) {
 export type ViewerOptions = {
   canvas: HTMLCanvasElement;
   renderPlanBuilder?: PlanBuilder;
-  statusEl?: HTMLElement;
   enableResize?: boolean;
   enableMouseControls?: boolean;
-  assetsBase?: string;
-  vanillaBase?: string;
-  onStatus?: (msg: string) => void;
-  onLoaded?: (structure: Structure) => void;
-  onError?: (err: unknown) => void;
+  createAssetsBase?: string | ResourceProvider;
+  vanillaAssetsBase?: string | ResourceProvider;
+  observer?: LimestoneObserver;
 };
 
 export function createStructureViewer (options: ViewerOptions) {
@@ -120,6 +119,7 @@ export function createStructureViewer (options: ViewerOptions) {
     throw new Error('WebGL not supported');
   }
 
+  const observer = options.observer ?? new LimestoneObserver();
   const planBuilder = options.renderPlanBuilder ?? buildRenderPlan;
 
   const state: ViewerState = {
@@ -135,10 +135,7 @@ export function createStructureViewer (options: ViewerOptions) {
   };
 
   const setStatus = (msg: string) => {
-    options.onStatus?.(msg);
-    if (options.statusEl) {
-      options.statusEl.textContent = msg;
-    }
+    observer.emit({ type: 'loading-progress', message: msg });
   };
 
   const buildView = () => {
@@ -236,15 +233,26 @@ export function createStructureViewer (options: ViewerOptions) {
     }, { passive: false });
   }
 
-  const loadStructure = async (file: File) => {
-    setStatus(`Loading ${file.name}...`);
+  const loadStructure = async (input: File | ArrayBuffer) => {
+    const isFile = input instanceof File;
+    const name = isFile ? input.name : 'structure.nbt';
+    setStatus(`Loading ${name}...`);
     try {
-      const nbt = await file.arrayBuffer();
+      const nbt = isFile ? await input.arrayBuffer() : input;
       const structure = await loadStructureFromNbt(nbt);
       setStatus('Fetching assets...');
+
+      const vanillaProvider = typeof options.vanillaAssetsBase === 'string'
+        ? new FetchResourceProvider(options.vanillaAssetsBase)
+        : options.vanillaAssetsBase ?? new FetchResourceProvider('./assets/minecraft/1.20.1/');
+
+      const assetsProvider = typeof options.createAssetsBase === 'string'
+        ? new FetchResourceProvider(options.createAssetsBase)
+        : options.createAssetsBase ?? new FetchResourceProvider('./assets/create/0.5.1.j/');
+
       const resourcesBundle: ResourceBundle = await loadResourcesForStructure(structure, {
-        assetsBase: options.assetsBase,
-        vanillaBase: options.vanillaBase
+        createAssetsBase: assetsProvider.getBasePath(),
+        vanillaAssetsBase: vanillaProvider.getBasePath()
       });
 
       const renderPlan = planBuilder(structure.getBlocks(), resourcesBundle.resources, mesh => uploadMeshBuffers(gl, mesh));
@@ -282,13 +290,13 @@ export function createStructureViewer (options: ViewerOptions) {
 
       state.structure = structure;
       resetCamera(structure);
-      setStatus(`Loaded ${file.name}`);
+      setStatus(`Loaded ${name}`);
       resize();
-      options.onLoaded?.(structure);
+      observer.emit({ type: 'structure-loaded' });
     } catch (err) {
       console.error(err);
       setStatus('Failed to load structure');
-      options.onError?.(err);
+      observer.emit({ type: 'fatal-error', message: 'Failed to load structure', error: err });
     }
   };
 
@@ -297,6 +305,7 @@ export function createStructureViewer (options: ViewerOptions) {
 
   return {
     state,
+    observer,
     loadStructure,
     requestRender,
     setStatus,

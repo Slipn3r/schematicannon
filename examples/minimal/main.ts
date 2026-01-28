@@ -1,5 +1,5 @@
 
-import { createStructureViewer, type SupportedVersions } from '../../src';
+import { createStructureViewer, FetchResourceProvider, type SupportedVersions } from '../../src';
 
 const canvas = document.getElementById('viewport') as HTMLCanvasElement;
 const fileInput = document.getElementById('nbt-input') as HTMLInputElement;
@@ -14,12 +14,10 @@ if (!canvas) {
 } else {
   let viewer: ReturnType<typeof createStructureViewer> | null = null;
   let currentFile: File | null = null;
-  let currentCreateVersion = '';
-  let currentMcVersion = '';
 
   const updateViewer = async () => {
-    currentCreateVersion = createSelect.value;
-    currentMcVersion = mcSelect.value;
+    const currentCreateVersion = createSelect.value;
+    const currentMcVersion = mcSelect.value;
 
     if (viewer) {
       viewer.dispose();
@@ -32,24 +30,27 @@ if (!canvas) {
 
     statusEl.textContent = `Initializing viewer for Create ${currentCreateVersion} / MC ${currentMcVersion}`;
 
-    // Path to assets
-    const assetsBase = `assets/create/${currentCreateVersion}`;
-    const vanillaBase = `assets/minecraft/${currentMcVersion}/`;
+    // Use FetchResourceProvider explicitly to demonstrate the API
+    const createAssets = new FetchResourceProvider(`assets/create/${currentCreateVersion}/`);
+    const vanillaAssets = new FetchResourceProvider(`assets/minecraft/${currentMcVersion}/`);
 
     try {
       viewer = createStructureViewer({
         canvas,
-        assetsBase,
-        vanillaBase,
-        statusEl,
+        createAssetsBase: createAssets,
+        vanillaAssetsBase: vanillaAssets,
         enableResize: true,
-        enableMouseControls: true,
-        onError: e => {
-          console.error(e);
-          statusEl.textContent = 'Error: ' + e;
-        },
-        onStatus: msg => {
-          statusEl.textContent = msg;
+        enableMouseControls: true
+      });
+
+      viewer.observer.subscribe(event => {
+        if (event.type === 'loading-progress') {
+          statusEl.textContent = event.message;
+        } else if (event.type === 'fatal-error') {
+          console.error(event.error);
+          statusEl.textContent = 'Error: ' + event.message;
+        } else if (event.type === 'structure-loaded') {
+          statusEl.textContent = 'Structure loaded successfully!';
         }
       });
 
@@ -65,7 +66,7 @@ if (!canvas) {
   };
 
   try {
-    const supportedVersionsResponse = await fetch('../../assets/supportedVersions.json');
+    const supportedVersionsResponse = await fetch('assets/supportedVersions.json');
     if (!supportedVersionsResponse.ok) {
       statusEl.textContent = 'Failed to load supported versions.';
       throw new Error('Failed to load supported versions');
@@ -83,8 +84,9 @@ if (!canvas) {
       const createVersion = createSelect.value;
       const mapping = supported.create.find(c => c.version === createVersion);
       const previousMc = mcSelect.value;
+
       mcSelect.innerHTML = '';
-      mapping?.game_versions.forEach(mc => {
+      mapping?.game_versions.sort().reverse().forEach(mc => {
         const option = document.createElement('option');
         option.value = mc;
         option.textContent = `MC ${mc}`;

@@ -1,12 +1,11 @@
 import { BlockDefinition, BlockModel, Identifier, type Resources } from 'deepslate';
-import { describeBlockDefinition, createBlockModelFromJson, ModelMultiPartCondition } from './deepslateExtensions';
-import { mergeAtlases } from './atlasMerger';
+import { describeBlockDefinition, createBlockModelFromJson, ModelMultiPartCondition } from './deepslateExtensions.js';
+import { mergeAtlases } from './atlasMerger.js';
 import type { Structure, TextureAtlas } from 'deepslate';
-import { CreateModLoader, type CreateModLoaderOptions, type LoadedAssets } from './createLoader';
-import { loadCreateModelManifest, MODEL_MANIFEST_FILE } from './createModelManifest';
+import { CreateModLoader, type CreateModLoaderOptions, type LoadedAssets } from './createLoader.js';
+import { loadCreateModelManifest } from './createModelManifest.js';
 import { RawBlockState, RawBlockModel } from '../types/assets';
-
-type FetchFn = typeof fetch;
+import { ResourceProvider, FetchResourceProvider } from '../loader/resourceProvider.js';
 
 export interface VanillaAssetBundle {
   blockStates: Record<string, RawBlockState>;
@@ -16,61 +15,37 @@ export interface VanillaAssetBundle {
 }
 
 export interface ResourceLoadOptions extends CreateModLoaderOptions {
-  vanillaBase?: string;
+  vanillaAssetsBase?: string | ResourceProvider;
+  createAssetsBase?: string | ResourceProvider;
   summaryBase?: string;
   atlasBase?: string;
-  fetchFn?: FetchFn;
 }
 
-const DEFAULT_VANILLA_BASE = './assets/minecraft/';
-const DEFAULT_ASSETS_BASE = './assets/create';
+const DEFAULT_VANILLA_BASE = './assets/minecraft/1.20.1/';
 const DEFAULT_SUMMARY_BASE = 'https://raw.githubusercontent.com/misode/mcmeta/summary/';
 const DEFAULT_ATLAS_BASE = 'https://raw.githubusercontent.com/misode/mcmeta/atlas/';
 
-const fetchJsonLocalFirst = async (fetchFn: FetchFn, localPath: string, remoteUrl: string) => {
-  try {
-    const r = await fetchFn(localPath);
-    if (r.ok) {
-      return await r.json();
-    }
-  } catch (e) {
-    console.warn(`Local fetch failed for ${localPath}`, e);
-  }
-  const remote = await fetchFn(remoteUrl);
-  if (!remote.ok) {
-    throw new Error(`Failed to fetch ${remoteUrl}`);
-  }
-  return await remote.json();
-};
-
-const fetchImageLocalFirst = (_fetchFn: FetchFn, localPath: string, remoteUrl: string) => new Promise<HTMLImageElement>((res, rej) => {
-  const load = (src: string, fallback?: string) => {
-    const image = new Image();
-    image.onload = () => res(image);
-    image.onerror = () => {
-      if (fallback) {
-        load(fallback);
-      } else {
-        rej(new Error(`Failed to load image ${src}`));
-      }
-    };
-    image.crossOrigin = 'Anonymous';
-    image.src = src;
-  };
-  load(localPath, remoteUrl);
-});
-
 export async function loadVanillaAssets (options: ResourceLoadOptions = {}): Promise<VanillaAssetBundle> {
-  const fetchFn = options.fetchFn ?? fetch;
-  const vanillaBase = options.vanillaBase ?? DEFAULT_VANILLA_BASE;
+  const provider = typeof options.vanillaAssetsBase === 'string'
+    ? new FetchResourceProvider(options.vanillaAssetsBase)
+    : options.vanillaAssetsBase ?? new FetchResourceProvider(DEFAULT_VANILLA_BASE);
+
   const summaryBase = options.summaryBase ?? DEFAULT_SUMMARY_BASE;
   const atlasBase = options.atlasBase ?? DEFAULT_ATLAS_BASE;
 
   const [blockStates, blockModels, uvMap, atlasImage] = await Promise.all([
-    fetchJsonLocalFirst(fetchFn, `${vanillaBase}block_definition.json`, `${summaryBase}assets/block_definition/data.min.json`),
-    fetchJsonLocalFirst(fetchFn, `${vanillaBase}model.json`, `${summaryBase}assets/model/data.min.json`),
-    fetchJsonLocalFirst(fetchFn, `${vanillaBase}atlas.json`, `${atlasBase}all/data.min.json`),
-    fetchImageLocalFirst(fetchFn, `${vanillaBase}atlas.png`, `${atlasBase}all/atlas.png`)
+    provider.getJson('block_definition.json').catch(() => fetch(`${summaryBase}assets/block_definition/data.min.json`).then(r => r.json())) as Promise<Record<string, RawBlockState>>,
+    provider.getJson('model.json').catch(() => fetch(`${summaryBase}assets/model/data.min.json`).then(r => r.json())) as Promise<Record<string, RawBlockModel>>,
+    provider.getJson('atlas.json').catch(() => fetch(`${atlasBase}all/data.min.json`).then(r => r.json())) as Promise<Record<string, [number, number, number, number]>>,
+    provider.getTexture('atlas.png').catch(() => {
+      return new Promise<HTMLImageElement>((res, rej) => {
+        const image = new Image();
+        image.onload = () => res(image);
+        image.onerror = () => rej(new Error('Failed to load vanilla atlas texture'));
+        image.crossOrigin = 'Anonymous';
+        image.src = `${atlasBase}all/atlas.png`;
+      });
+    })
   ]);
 
   return { blockStates, blockModels, uvMap, atlasImage };
@@ -86,27 +61,28 @@ export interface ResourceBundle {
 }
 
 export async function loadResourcesForStructure (structure: Structure, options: ResourceLoadOptions = {}): Promise<ResourceBundle> {
-  const fetchFn = options.fetchFn ?? fetch;
-  const assetsBase = options.assetsBase ?? DEFAULT_ASSETS_BASE;
+  const createProvider = typeof options.createAssetsBase === 'string'
+    ? new FetchResourceProvider(options.createAssetsBase)
+    : options.createAssetsBase ?? new FetchResourceProvider('./assets/create/0.5.1/');
 
-  const vanillaPromise = loadVanillaAssets({ ...options, fetchFn });
+  const vanillaPromise = loadVanillaAssets(options);
   const manifestPromise = options.modelManifest
     ? Promise.resolve(undefined)
-    : loadCreateModelManifest(assetsBase, fetchFn).catch(err => {
-      console.warn(`[deepslate resources] Failed to load Create model manifest from ${assetsBase}/${MODEL_MANIFEST_FILE}`, err);
+    : loadCreateModelManifest(createProvider).catch(err => {
+      console.warn('[limestone resources] Failed to load Create model manifest', err);
       return undefined;
     });
 
   const [vanilla, manifestData] = await Promise.all([vanillaPromise, manifestPromise]);
+  const loader = new CreateModLoader({
+    ...options,
+    assetsProvider: createProvider,
+    modelManifest: manifestData ?? options.modelManifest
+  });
 
   const blocks = new Set<string>();
   structure.getBlocks().forEach(b => blocks.add(b.state.getName().toString()));
 
-  const loaderOptions: CreateModLoaderOptions = {
-    ...options,
-    modelManifest: options.modelManifest ?? manifestData
-  };
-  const loader = new CreateModLoader(loaderOptions);
   const modAssets: LoadedAssets = await loader.loadBlocks(blocks);
   const atlas = await mergeAtlases(vanilla.atlasImage, vanilla.uvMap, modAssets.textures);
 

@@ -1,7 +1,7 @@
 {
   "name": "limestone",
   "version": "0.1.0",
-  "description": "Library for rendering Create mod content on top of Deepslate vanilla Minecraft renderer",
+  "description": "Library for rendering Create mod schematics in the browser",
   "type": "module",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -25,12 +25,12 @@
     "lint/tsc": "tsc --noEmit",
     "examples/deepslate": "vite examples/deepslate",
     "examples/minimal": "vite examples/minimal",
-    "generate-assets": "tsx src/cli/index.ts generate-assets -d ./assets"
+    "generate-assets": "node dist/cli.js generate-assets"
   },
   "dependencies": {
     "commander": "^14.0.2",
-    "deepslate": "^0.25.1",
-    "gl-matrix": "^3.4.4"
+    "deepslate": "0.25.1",
+    "gl-matrix": "3.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",

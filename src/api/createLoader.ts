@@ -2,8 +2,8 @@ import { BlockDefinition, BlockModel, Direction } from 'deepslate';
 import { createBlockModelFromJson, ModelMultiPartCondition } from './deepslateExtensions';
 import { parseObj, ObjMeshPart } from './objLoader';
 import { RawBlockModel, RawBlockState, RawModelElement, RawBlockStateVariant, RawMultipartCase, RawModelFace } from '../types/assets';
+import { ResourceProvider, FetchResourceProvider } from '../loader/resourceProvider.js';
 
-const DEFAULT_ASSETS_BASE = './assets/create';
 const SUBPART_TOKENS = ['head', 'blade', 'pole', 'cog', 'cogwheel', 'pointer', 'flap', 'hand', 'fan', 'shaft', 'arm', 'middle', 'hose', 'top', 'belt', 'claw', 'body', 'wheel', 'roller', 'valve', 'handle', 'casing', 'guard'];
 const AUTO_SUBPART_BLOCKS = ['funnel', 'tunnel', 'spout', 'mechanical_mixer', 'mechanical_pump', 'portable_storage_interface', 'mechanical_saw', 'mechanical_drill', 'deployer', 'mechanical_press', 'analog_lever', 'hand_crank', 'weighted_ejector', 'create:water_wheel', 'mechanical_roller', 'chain_conveyor'];
 
@@ -14,7 +14,7 @@ export interface LoadedAssets {
 }
 
 export interface CreateModLoaderOptions {
-  assetsBase?: string;
+  assetsProvider?: ResourceProvider;
   enableAutoSubparts?: boolean;
   modelManifest?: Iterable<string>;
 }
@@ -25,7 +25,7 @@ export class CreateModLoader {
   private readonly fetchedTextures = new Map<string, Blob>();
   private readonly enableAutoSubparts: boolean;
   private readonly autoSubpartLog: Array<{ blockId: string; baseModel: string; subpart: string; when: ModelMultiPartCondition | undefined }> = [];
-  private readonly assetsBase: string;
+  private readonly provider: ResourceProvider;
   private readonly modelManifest: Set<string>;
 
   // Cache to prevent duplicate fetches
@@ -37,7 +37,7 @@ export class CreateModLoader {
     // Default on; can disable with ?enableAutoSubparts=0 if it over-attaches.
     const paramFlag = params?.get('enableAutoSubparts');
     this.enableAutoSubparts = options.enableAutoSubparts ?? paramFlag !== '0';
-    this.assetsBase = options.assetsBase ?? DEFAULT_ASSETS_BASE;
+    this.provider = options.assetsProvider ?? new FetchResourceProvider('./assets/create/0.5.1/');
     this.modelManifest = new Set(options.modelManifest ?? []);
   }
 
@@ -63,7 +63,7 @@ export class CreateModLoader {
 
       try {
         // 1. Fetch Block Definition (BlockState)
-        const defJson = await this.fetchJson(`${this.assetsBase}/blockstates/${id.replace('create:', '')}.json`) as RawBlockState;
+        const defJson = await this.fetchJson(`blockstates/${id.replace('create:', '')}.json`) as RawBlockState;
 
         if (defJson) {
           if (id === 'create:mechanical_crafter') {
@@ -1029,9 +1029,7 @@ export class CreateModLoader {
     }
 
     const relativePath = cleanPath.replace('create:', '');
-    const url = `${this.assetsBase}/models/${relativePath}.json`;
-
-    const modelJson = await this.fetchJson(url) as RawBlockModel | undefined;
+    const modelJson = await this.fetchJson(`models/${relativePath}.json`) as RawBlockModel | undefined;
     if (modelJson) {
       if (modelJson.parent) {
         await this.loadModelRecursive(modelJson.parent);
@@ -1049,8 +1047,7 @@ export class CreateModLoader {
           // "create:block/crushing_wheel/crushing_wheel.obj"
           const relativeRef = objPath.replace(/^create:/, '');
           const cleanRelPath = relativeRef.startsWith('models/') ? relativeRef.substring(7) : relativeRef;
-          const objUrl = `${this.assetsBase}/models/${cleanRelPath}`;
-          const objText = await this.fetchText(objUrl);
+          const objText = await this.fetchText(`models/${cleanRelPath}`);
 
           if (objText) {
             const parts = parseObj(objText);
@@ -1189,7 +1186,7 @@ export class CreateModLoader {
 
             modelJson.elements = parts;
           } else {
-            console.warn(`Failed to load OBJ: ${objUrl}`);
+            console.warn(`Failed to load OBJ: models/${cleanRelPath}`);
             modelJson.elements = [];
           }
         }
@@ -1249,8 +1246,7 @@ export class CreateModLoader {
       // Try a generic fallback: if a smart_* model is missing, reuse the base model without the smart_ prefix.
       if (cleanPath.includes('smart_')) {
         const fallbackPath = cleanPath.replace('smart_', '');
-        const fallbackUrl = `${this.assetsBase}/models/${fallbackPath.replace('create:', '')}.json`;
-        const fallbackJson = await this.fetchJson<RawBlockModel>(fallbackUrl);
+        const fallbackJson = await this.fetchJson<RawBlockModel>(`models/${fallbackPath.replace('create:', '')}.json`);
         if (fallbackJson) {
           console.warn(`[CreateModLoader] Missing ${cleanPath}, using fallback ${fallbackPath}`);
           this.flattenCompositeChildren(fallbackJson);
@@ -1685,10 +1681,9 @@ export class CreateModLoader {
     }
 
     const relativePath = cleanPath.replace('create:', '');
-    const url = `${this.assetsBase}/textures/${relativePath}.png`;
 
     try {
-      const blob = await this.fetchBlob(url);
+      const blob = await this.fetchBlob(`textures/${relativePath}.png`);
       if (blob) {
         this.fetchedTextures.set(cleanPath, blob);
         await this.loadFlowTextureForFluid(cleanPath);
@@ -1756,41 +1751,30 @@ export class CreateModLoader {
     return path;
   }
 
-  private async fetchJson<T = unknown> (url: string): Promise<T | null> {
+  private async fetchJson<T = unknown> (path: string): Promise<T | null> {
     try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        return null;
-      }
-      return await res.json() as T;
+      return await this.provider.getJson(path) as T;
     } catch (e) {
-      console.error(`Fetch error for ${url}`, e);
+      console.error(`Provider error for ${path}`, e);
       return null;
     }
   }
 
-  private async fetchText (url: string): Promise<string | null> {
+  private async fetchText (path: string): Promise<string | null> {
     try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        return null;
-      }
-      return await res.text();
+      return await this.provider.getText(path);
     } catch (e) {
-      console.error(`Fetch error for ${url}`, e);
+      console.error(`Provider error for ${path}`, e);
       return null;
     }
   }
 
-  private async fetchBlob (url: string): Promise<Blob | null> {
+  private async fetchBlob (path: string): Promise<Blob | null> {
     try {
-      const res = await fetch(url);
-      if (!res.ok) {
-        return null;
-      }
-      return await res.blob();
+      const buffer = await this.provider.getArrayBuffer(path);
+      return new Blob([buffer]);
     } catch (e) {
-      console.error(`Fetch error for ${url}`, e);
+      console.error(`Provider error for ${path}`, e);
       return null;
     }
   }
